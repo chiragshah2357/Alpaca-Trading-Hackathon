@@ -8,9 +8,15 @@
 ## 1. Context & goal
 
 - **Event:** lablab.ai — Alpaca AI Trading Agents Hackathon
+- **Dates:** **Aug 28 – Sep 4, 2026** (7 days online; kickoff Fri Aug 28, 8:30 PM IST). **Live trading window ≈ 5–6 market days only.**
+- **Prize pool:** $5,000 ($2,500 / $1,500 / $1,000). Paid to individuals (designate one on a team). Teams 1–6.
 - **Goal:** Build an autonomous options-trading agent that stands out from the crowd, not a "read news → buy call" toy.
 - **Constraint:** No paid Claude/OpenAI key. No sponsor credits (AMD credit was a typo). Everything must run on free tooling.
-- **Everything trades OPTIONS** (calls/puts), not plain stocks. Alpaca supports options on paper accounts.
+
+**Core requirements (mandatory, from the rules):**
+1. **Autonomous AI trading agent** using Alpaca's Trading API.
+2. **Must use Alpaca's MCP server OR CLI.** ✅ (we use MCP + CLI)
+3. **All strategies must incorporate options trading.** ✅ (calls/puts) — Alpaca options are enabled by default on paper accounts.
 
 ---
 
@@ -273,7 +279,34 @@ Caveats (all minor): scheduled runs can be delayed a few min under load (irrelev
 
 ---
 
-## 9. Setup checklist (all free)
+## 9. Judging criteria & the P&L demo strategy
+
+**Judging criteria — 5 categories (no published weights):**
+1. **P&L Performance** — actual trading P&L in the paper account. *Submission requires the Alpaca account ID so judges verify your P&L.* → P&L genuinely counts.
+2. **Technology Implementation** — how well the project uses Trading API + MCP/CLI.
+3. **Creativity & Originality** — concept, strategy, agent behavior.
+4. **Presentation & Execution** — clarity of the demo + the reasoning shown.
+5. **Social engagement** — build-in-public posts (quality + likes/comments/shares).
+
+**Reframe:** P&L is real but it's **1 of 5**. Don't chase the P&L leaderboard (luck over a short window) — aim for **respectable/positive P&L + win the other four** (which are in our control).
+
+**⏰ Timing reality:** live judged window = **Aug 28 – Sep 4 = ~5–6 trading days**, measured on the **fresh account** (can't pre-run). All live P&L comes from one clean 5-day window. → Dial everything in on a **dev/throwaway account during Aug 18–28**; run the fresh account clean from Aug 28.
+
+**The problem:** naked long options are **low win-rate** (lose small often, win big rarely) — a bad profile for 5 days. Tilt toward a smoother curve:
+- **Higher-delta contracts (~0.60–0.70, near/in-the-money)** instead of cheap OTM lottery tickets → higher win rate, less theta.
+- **Take profits early (+25–40%)** → bank *realized* gains inside the window (realized green > unrealized).
+- **Cut losers fast**; treat **cash as a position** — in a risk-off week, stay mostly flat. A flat account beats a bleeding one, and "the agent knew not to trade" is a strong talking point.
+- **Don't swing for the fences** — modest consistent green + great process beats a gamble that may crater.
+
+**The hedge — backtest for the video:** 5 live days is noise. Show a **backtest of the signal engine over months of historical stock data** to prove the edge regardless of the live week.
+- ⚠️ **Data caveat (verified):** Alpaca option greeks/IV are **snapshot/live-only — no history.** Can't cleanly backtest *options* P&L historically. → Backtest the **directional signal on historical stock bars** (free/easy); approximate option outcomes.
+- ✅ **Verified good:** greeks (delta/gamma/theta/vega/rho) + IV are **free on paper**, options enabled by default → the *live* engine has all it needs.
+
+**Presentation (1 of 5, 100% in our control):** equity curve (live + backtest), 2–3 **hero trades** with full agent reasoning, **risk-gate-in-action**, **self-grading loop**, metrics dashboard (win rate, avg win/loss, max drawdown).
+
+---
+
+## 10. Setup checklist (all free)
 
 - [ ] **Gemini API key** — aistudio.google.com → "Get API key" (no billing)
 - [ ] **Alpaca paper account** — alpaca.markets → sign up → generate paper keys
@@ -290,7 +323,9 @@ Use **`alpaca-py`** (current SDK). Ignore `alpaca-trade-api` — it's deprecated
 
 ---
 
-## 10. Submission rules (don't get disqualified)
+## 11. Submission rules & deliverables (don't get disqualified)
+
+**Required submission deliverables:** project title + short/long description, technology & category tags, cover image, **video presentation**, **slide presentation**, **public GitHub repo**, demo app platform + URL, **Alpaca paper account ID** (for P&L judging), up to **5 social post links**.
 
 - **Dev:** use any paper account during development.
 - **Submission (REQUIRED):** create a **brand-new, dedicated Alpaca paper account** for the final submission. Reused/existing accounts are **not eligible for judging**. → just swap keys in `.env` at the end.
@@ -300,7 +335,7 @@ Use **`alpaca-py`** (current SDK). Ignore `alpaca-trade-api` — it's deprecated
 
 ---
 
-## 11. Build milestones
+## 12. Build milestones
 
 1. **Setup** — keys, options enabled, MCP server running locally.
 2. **Wire the brain** — Gemini LangChain/LangGraph agent loads MCP tools via `langchain-mcp-adapters`.
@@ -314,14 +349,27 @@ Use **`alpaca-py`** (current SDK). Ignore `alpaca-trade-api` — it's deprecated
 
 ---
 
-## 12. Open questions / to verify
+## 13. Open questions / to verify
 
-- [ ] **Judging Criteria tab** — read it to confirm weighting (MCP integration vs. thesis vs. risk vs. demo) and tune scope.
-- [ ] **Options data on free tier** — confirm which IV/Greeks fields Alpaca's option **snapshot** exposes on the free paper data plan before leaning on greeks. Check docs.alpaca.markets.
-- [ ] Project folder: this doc lives in `C:\Users\chira\Desktop\alpaca-trading-agent\` (separate from the RAG repo). Confirm this is where the code should live too.
+- [x] **Judging criteria** — RESOLVED. 5 categories: P&L, Tech Implementation, Creativity/Originality, Presentation, Social. P&L is judged via submitted account ID. See §9.
+- [x] **Options data on free tier** — RESOLVED. Greeks (delta/gamma/theta/vega/rho) + IV available free on paper via option **snapshot** (live-only, no history). Options enabled by default. See §9.
+- [x] **Project folder** — CONFIRMED. Code + doc live in `C:\Users\chira\Desktop\alpaca-trading-agent\`, git repo pushed to `github.com/chiragshah2357/Alpaca-Trading-Hackathon`.
+- [ ] **Backtest scope** — decide how far to approximate options P&L historically given snapshot-only greeks (direction backtest on stock bars is the fallback).
+- [ ] **Watchlist** — finalize the ~20–40 liquid optionable names before Aug 28.
 
 ---
 
-## 13. Locked decisions (summary)
+## 14. Locked decisions (summary)
 
-> **Track 1 (Options Alpha) · Gemini brain (Groq fallback) · Hybrid decision (LLM thesis + rule-based execution) · built on Alpaca MCP server via langchain-mcp-adapters · risk gate between brain and orders · multi-signal conviction engine with options-aware metrics · deterministic funnel keeps LLM tokens at the last mile · self-grading thesis log · scheduled via GitHub Actions cron (headless, laptop-off) with market-clock guard + log committed to repo · fresh paper account at submission · build-in-public posts throughout.**
+> **Track 1 (Options Alpha) · Gemini brain (Groq fallback) · Hybrid decision (LLM thesis + rule-based execution) · built on Alpaca MCP server via langchain-mcp-adapters · risk gate between brain and orders · multi-signal conviction engine with options-aware metrics · deterministic funnel keeps LLM tokens at the last mile · P&L-tuned for the 5-day judged window (higher-delta, take profits early, cash-is-a-position) + historical backtest for the video · self-grading thesis log · scheduled via GitHub Actions cron (headless, laptop-off) with market-clock guard + log committed to repo · fresh paper account at submission · build-in-public posts throughout.**
+
+---
+
+### Judging criteria → where we score (§9)
+| Criterion | Our play |
+|-----------|----------|
+| P&L Performance | Higher-delta + early profits + cash discipline over the 5-day window; don't gamble |
+| Technology Implementation | MCP server + CLI, the "core of the theme" |
+| Creativity & Originality | Multi-tier conviction engine, bull/bear debate, self-grading |
+| Presentation & Execution | Equity curve + hero trades + risk-gate-in-action + metrics dashboard |
+| Social engagement | Build-in-public posts at each milestone, tagging @lablabai / @AlpacaHQ |
