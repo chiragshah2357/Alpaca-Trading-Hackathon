@@ -1,0 +1,18 @@
+# Model layer (needed to actually build/call models)
+langchain-openai
+langchain-core
+python-dotenv
+
+# Broader agent stack (listed now; wired up as we build — README §12)
+langchain
+langgraph
+langchain-mcp-adapters
+alpaca-py
+
+# Optional native provider clients — only if you prefer them over the
+# OpenAI-compatible path in agent/llm.py:
+# langchain-groq
+# langchain-google-genai
+# langchain-cerebras
+
+# Pin exact versions after the first clean install:  pip freeze > requirements.lock

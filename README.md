@@ -1,425 +1,572 @@
-# Alpaca AI Trading Agents Hackathon — Planning
-
-> Master plan for the lablab.ai × Alpaca "AI Trading Agents" hackathon.
-> Living document — update as decisions change.
-
----
-
-## 1. Context & goal
-
-- **Event:** lablab.ai — Alpaca AI Trading Agents Hackathon
-- **Dates:** **Aug 28 – Sep 4, 2026** (7 days online; kickoff Fri Aug 28, 8:30 PM IST). **Live trading window ≈ 5–6 market days only.**
-- **Prize pool:** $5,000 ($2,500 / $1,500 / $1,000). Paid to individuals (designate one on a team). Teams 1–6.
-- **Goal:** Build an autonomous options-trading agent that stands out from the crowd, not a "read news → buy call" toy.
-- **Constraint (updated):** No paid Claude/OpenAI key and no sponsor credits (AMD credit was a typo). **But** Yugo has **~$100 in winnings** from a previous hackathon earmarked for **Hugging Face Inference Providers** — so we can now run **paid HF-hosted open models** (e.g. Kimi-K3, DeepSeek-V4-Pro) instead of being locked to free tiers. Free tooling remains the fallback; the paid budget is a bonus, not a dependency.
-
-**Core requirements (mandatory, from the rules):**
-1. **Autonomous AI trading agent** using Alpaca's Trading API.
-2. **Must use Alpaca's MCP server OR CLI.** ✅ (we use MCP + CLI)
-3. **All strategies must incorporate options trading.** ✅ (calls/puts) — Alpaca options are enabled by default on paper accounts.
-
----
-
-## 2. Track decision
-
-**Chosen: Track 1 — Options Alpha Agents** (directional call/put agents with a testable thesis).
-
-| Track | Why / why not |
-|-------|---------------|
-| **1. Options Alpha** ✅ | Simplest options plumbing (single-leg), and the track literally rewards *reasoning/conviction* — plays to LLM + RAG strengths. Best live-demo story. |
-| 2. Volatility & Event | Higher ceiling (trade IV not direction), but concept-risk (implied vol/greeks). Stretch option only. |
-| 3. Hedging & Risk | Defensive, rules-driven; medium options complexity. |
-| 4. Income & Overlay | Mechanical wheel/covered calls; "consistency" is hard to demo in a short window. |
-
-**Winning insight:** most teams will ship a coin-flip dressed up with an LLM. Our moat is the **decision *process*** — a multi-signal, options-aware engine that scores conviction, sizes by risk, picks the right contract, and grades its own thesis.
-
----
-
-## 3. Model / brain decision
-
-**Now leaning paid-HF for the deep-thinking brain** (Yugo's ~$100 HF budget) — a stronger reasoning model with real rate limits beats juggling free-tier caps.
-
-> **Why bigger = better here (Yugo):** SOTA large models are markedly stronger at **agentic tool-use** (planning multi-step tool calls, staying on-task across a wake cycle) and carry deeper **finance/markets knowledge** (options mechanics, greeks, market structure) baked in. For a thesis-forming trading agent, that's exactly the capability we're paying for — the reasoning *is* the product.
-
-- **Primary brain (planned):** a top open model on **Hugging Face Inference Providers** — candidates: **Kimi-K3**, **DeepSeek-V4-Pro** (final pick TBD, Chirag skimming the [supported-models list](https://huggingface.co/inference/models)). Paid but funded, so higher rate limits and no 1M-token/week ceiling to design around. **Cost is a non-issue — see §13a** (~$2–20 total vs. Yugo's ~$100).
-- **Free-tier fallback / cost saver:**
-  - **Gemini** (Google AI Studio free tier — strong reasoning, huge context for RAG) — still viable if we want to preserve HF budget.
-  - **Groq** (Llama 3.3 70B — ultra-fast) for cheap high-frequency steps like headline sentiment.
-    - *Alt fast-lane:* **Gemma-via-Cerebras** — a viable Groq substitute for the cheap high-frequency lane only, **not** the thesis brain (Gemma 4 31B is a tier below DeepSeek/Kimi on agentic reasoning). Caveats: free tier is now a one-time **$5 trial** (not the old 1M/day) with a hard **8k-token context cap** → too tight for the RAG/debate thesis step; paid Gemma escapes the cap but buys a weaker model at similar cost.
-- **Swappable** via LangChain — the provider is one `.env` edit / one adapter swap, so each teammate can run a *different* brain on their own account for the bake-off (see §14a).
-- **Decision style:** **Hybrid** — LLM forms the thesis; deterministic code enforces risk and executes. Judges reward visible guardrails; a pure-LLM order-placer reads as reckless.
-
-> **Rate-limit safeguard:** if we end up on a free/limited tier for any provider, add **exponential-backoff retry** around every LLM call (e.g. on HTTP 429: wait, retry, don't crash the wake cycle). A paid HF key largely removes this need, but the funnel already batches calls so a stray 429 shouldn't kill a run.
-
----
-
-## 4. Architecture
-
-```
-   News / price signals  ─────┐   (RAG layer)
-                              ▼
-                 ┌─────────────────────────┐
-                 │   Gemini brain (agent)   │  reasons → forms thesis
-                 │   LangChain / LangGraph  │  → decides call/put + size
-                 └───────────┬─────────────┘
-                             ▼
-                 ┌─────────────────────────┐
-                 │   Risk guardrail layer   │  our code: position caps,
-                 │   (we own this)          │  stop-loss, per-symbol limits
-                 └───────────┬─────────────┘
-                             ▼  approved trades only
-          langchain-mcp-adapters ─► Alpaca MCP server ─► Alpaca paper account
-                             │                             (options orders)
-                             ▼
-                   Alpaca CLI ── scheduled / cron "run every N min" mode
-```
-
-### Why MCP is central
-The Alpaca Partners page states the **MCP server** is *"the core of the hackathon theme."* So we build **on top of Alpaca's MCP server** instead of hand-rolling a REST wrapper — this is an explicit judging signal.
-
-### Component roles
-- **Alpaca MCP server** (`github.com/alpacahq/alpaca-mcp-server`) — Python server run locally with paper keys. Exposes Alpaca functions as structured MCP tools (account, positions, quotes, option contracts, orders). We don't rebuild these.
-- **`langchain-mcp-adapters`** — bridges the MCP server's tools into LangChain tools the **Gemini** agent can call. This is the key trick to use the sponsor's MCP server with a free non-Claude brain.
-- **Risk guardrail layer (ours)** — the LLM gets **read** tools directly (quotes, positions, chains) but **NOT** the raw place-order tool. It calls our `propose_trade(thesis, symbol, direction, size)`; our code validates against risk rules, then calls the MCP execute tool. Auditable gate between "AI decided" and "money moved."
-- **Alpaca CLI** — for long-running/scheduled runs (cron "wake every 15 min, re-evaluate thesis"). Lighter than keeping the full stack hot; the "production runtime" story for the demo.
-
----
-
-## 5. The decision engine (the differentiator)
-
-Combine signals into a transparent **conviction score (0–100)**; only trade above a threshold.
-
-### Tier 1 — Directional conviction (from Alpaca stock bars + news endpoint)
-- Trend — price vs. 20/50-day moving averages
-- Momentum — RSI, MACD
-- Volume — unusual / relative volume confirmation
-- Multi-timeframe agreement — daily + intraday align
-- Market regime — SPY risk-on/off (don't fight the tape)
-- News/earnings sentiment (RAG) — one weighted input, not the whole thesis
-
-### Tier 2 — Options-aware metrics (**the real edge — most teams skip these**)
-- **Implied Volatility + IV Rank** — is the option expensive or cheap vs. its own past year?
-- **Expected move** — market's priced-in move; is our thesis bigger than what we pay for?
-- **Greeks** — Delta (directional exposure / prob-ITM proxy), Theta (daily decay "rent"), Vega (IV exposure)
-- **Strike + expiry selection** — target delta (e.g. ~30Δ), DTE balances thesis timeframe vs. theta bleed
-- **Liquidity gate** — open interest, volume, bid-ask spread; reject illiquid contracts
-- **Break-even + risk/reward** — required move realistic?
-
-### Tier 3 — Risk & portfolio metrics (quantified guardrails)
-
-**Core principle:** you don't *predict* randomness (an Elon tweet, a shock headline) — you *size and structure* so it can't kill you.
-
-**The structural shield — long options = defined risk.** When you **buy** a call/put, max loss = the premium paid. No margin call, no surprise debt. A bad overnight gap can only cost the premium you *chose in advance*. This is *why* the track uses long options — capped downside, big upside.
-
-**Hard-coded risk config** (anchored to Alpaca paper default of $100k):
-```python
-STARTING_CAPITAL       = 100_000   # Alpaca paper default
-MAX_RISK_PER_TRADE     = 0.02      # ≤ 2% → max $2,000 premium on any one trade
-MAX_PORTFOLIO_DEPLOYED = 0.30      # ≤ 30% of account in open premium at once
-MAX_PER_SYMBOL         = 0.05      # ≤ 5% in any single underlying (the "Elon cap")
-MIN_CONVICTION         = 65        # don't trade below this scorecard number
-STOP_LOSS              = -0.40     # exit a position down 40% of its premium
-TAKE_PROFIT            = 0.75      # exit a position up 75%
-DAILY_LOSS_HALT        = -0.05     # stop trading for the day if account down 5%
-AVOID_EARNINGS_WITHIN  = 2         # days — skip naive bets right before earnings
-```
-
-**Rule → what it protects against:**
-| Rule | Protects against |
-|------|------------------|
-| 2% max per trade | One surprise dents you ≤ 2%; can't blow up on a single bet |
-| 5% max per symbol | Can't be secretly all-in on one name (TSLA tweet can't wreck the book) |
-| 30% max deployed | 70% stays cash — dry powder + not fully exposed to market-wide shock |
-| Stop-loss −40% | Auto-exit slow losers before they round-trip to zero |
-| Daily loss halt −5% | Benches the agent on a brutal day; no revenge-trading |
-| Avoid earnings | Dodges *scheduled* volatility bombs unless the thesis IS the event |
-
-**Gap risk (be honest about it):** a stop-loss is **not** a force field. Between the ~15-min checks — and overnight — price can gap past the stop, so the agent exits at the (worse) open price. *Mitigant:* long options already cap loss at premium. So: stop-loss saves money on **slow** losers; **defined risk** saves you on **sudden** ones. Two layers.
-
-**The calendar edge:** many "surprises" aren't random — earnings, Fed meetings, FDA decisions are on a calendar. The agent pulls the earnings calendar and refuses to hold a naive directional bet into a scheduled event. Removes a big chunk of miscellaneous risk for free; only the genuinely unpredictable remains — and sizing caps that.
-
-**Portfolio-level checks:** net delta (avoid 5x the same bet), correlation check (don't stack correlated calls), max concurrent positions / sector concentration caps.
-
-**Where it lives:** these rules ARE the risk-gate layer (the `propose_trade` wrapper). The LLM never sees or overrides them — it proposes; the gate (1) rejects if conviction < 65, (2) rejects if any cap is broken, (3) **sizes** premium ≤ 2%, (4) attaches stop-loss / take-profit, (5) then lets MCP place the order. → the "agent wanted 10 contracts, gate capped it at 2" demo moment.
-
-### Recommended buildable set (don't over-scope)
-> Tier 1 (3–4 signals) → **conviction score** → Tier 2 (**IV Rank + expected move + delta-based strike pick + liquidity gate**) → Tier 3 risk sizing → **self-grading log**. Add bull/bear debate if time allows.
-
----
-
-## 6. Candidate selection funnel & token budget
-
-**Core principle:** *Math is free. LLM tokens are precious. Filter with math, decide with the LLM.*
-The LLM must **never** scan the market. A deterministic funnel narrows thousands of names to 2–3 finalists at zero token cost; the LLM only runs on the last mile.
-
-Free-tier ceiling assumed: **~1M tokens per LLM per week.** This design stays well under it.
-
-> **With the paid HF budget (§3), the hard weekly ceiling goes away** — but keep the funnel anyway. "Filter with math, decide with the LLM" isn't just about token caps; it keeps the ~$100 stretching across three teammates' test accounts and keeps each wake cycle fast/cheap. Paid ≠ license to let the LLM scan the market.
-
-### The funnel
-```
-  ~5000 stocks
-       │   ❌ LLM never touches this level
-       ▼
-  [1] Fixed watchlist        → ~20–40 liquid, optionable names            (0 tokens)
-       ▼
-  [2] Deterministic screen   → RSI / MACD / volume / regime in Python      (0 tokens)
-       │                        keep only names with a real setup
-       ▼
-  2–3 candidates survive
-       ▼
-  [3] LLM thesis             → news + reasoning + bull/bear debate         (tokens ONLY here)
-       ▼
-  [4] Contract pick          → strike/expiry by delta + DTE math on chain  (0 tokens)
-```
-
-- **[1] Watchlist, not the market** — fixed ~20–40 liquid, heavily-optioned names (mega-caps + a few ETFs). Kills 99% of the cost instantly.
-- **[2] Deterministic pre-screen** — Tier 1 signals are pure math on price bars → **0 LLM tokens**. Rank, keep only setups above a threshold (~2–3/day survive).
-- **[3] LLM as closer, not scanner** — only the 2–3 survivors get expensive thesis reasoning / debate.
-- **[4] Contract selection is math** — LLM decides direction + conviction; code picks the actual contract by target delta (~30Δ), DTE, tightest spread.
-
-### Token savers
-- **Use Alpaca's news endpoint, not web browsing** — structured, free, per-ticker; browsing is slow, unreliable, token-hungry.
-- **Split providers** — Groq (own free budget) for cheap high-frequency bits (headline sentiment); Gemini for deep thesis. Two free budgets ≈ double the ceiling.
-- **Cache + scheduled cadence** — run the funnel a few times/day (Alpaca CLI cron), cache news/results; don't re-query per thesis iteration.
-
-### Weekly budget estimate
-| Stage | LLM tokens |
-|-------|-----------|
-| Watchlist + Tier 1 screen (all names) | **0** |
-| Thesis on ~3 finalists/day (~7k each) | ~21k/day |
-| Bull/bear debate (×3) | ~40k/day |
-| Contract selection | **0** |
-| **Weekly total (~5 trading days)** | **~300k** — comfortably under 1M |
-
-> Mental model: the LLM isn't a scanner, it's a **closer**. Math does the scouting; the LLM shows up only for the final 2–3 decisions.
-
----
-
-## 7. Runtime & scheduling model
-
-**Key correction:** the MCP server does **not** trade on its own. It's *hands, not a brain* — a translator that holds the Alpaca keys and exposes Alpaca functions as tools. It sits idle until the agent calls it. The **agent** (Gemini + funnel + risk gate) decides; the MCP executes.
-
-```
-  Agent (brain)  ──calls tools──►  MCP server (hands)  ──►  Alpaca account
-  decides WHAT to do              translates & executes      holds positions
-```
-
-### "Runs 5–7 days" ≠ an LLM thinking 24/7
-A **scheduler is the heartbeat.** It wakes the agent on a cadence; the agent runs one cheap cycle, then sleeps. Between wakes = **zero tokens, zero cost**; positions rest in the Alpaca account. Market is only open ~6.5 hrs/day, 5 days/week — nights/weekends the agent sleeps entirely. This is what keeps the weekly budget (~300k tokens) realistic.
-
-```
-  every 15–30 min during market hours:
-     wake → run funnel (math, free) → LLM only if finalists → act via MCP → sleep
-  overnight / weekend:
-     sleep entirely (positions rest in Alpaca)
-```
-
-### The wake cycle (each tick)
-1. **Rehydrate** — ask MCP "what do I hold?" + read local thesis log. (Agent is *stateless between runs*; it re-learns its situation each wake.)
-2. **Manage open trades first** — check stop-loss / take-profit on existing positions; close via MCP if hit.
-3. **Hunt new trades** — run Tier 1 funnel (math); spend LLM tokens only if a candidate survives.
-4. **Act** — approved trades → risk gate → MCP places order.
-5. **Log & sleep.**
-
-### Where state / "memory" lives (survives crashes)
-Two sources of truth, both **outside** the LLM:
-- **Alpaca account** = the real positions (authoritative). Query fresh each wake via MCP.
-- **Local log / DB** = theses + entry reasoning (for stop-loss tracking + self-grading).
-
-Because the agent rehydrates from these every wake, a reboot/crash is harmless — restart the script and it resumes by reading account state. No fragile long-lived in-memory process.
-
-### Deployment decision (laptop can't stay on → must run in the cloud)
-
-Two runtime styles:
-| Style | How it stays alive | Needs |
-|-------|-------------------|-------|
-| **A. Cron / scheduled** | Platform fires the script every N min; script runs one cycle and **exits** | No always-on machine — just a scheduler |
-| **B. Always-on process** | One process runs a `while True: … sleep()` loop all week | A machine that never sleeps (cloud VM) |
-
-**✅ Chosen: Style A on GitHub Actions (scheduled cron).** Free, no server, no laptop, and the public repo doubles as **build-in-public proof** for judges. Maps exactly onto the wake→cycle→sleep model.
-
-```
-GitHub servers, on a schedule (e.g. every 15 min):
-   1. spin up a fresh runner
-   2. checkout code, install deps
-   3. run one wake cycle (agent_cycle.py)
-   4. commit updated thesis log back to the repo
-   5. runner destroyed
-   ...repeats automatically all week, laptop off
-```
-
-**US market hours (options-relevant):**
-- **Regular session: 9:30 AM – 4:00 PM ET, Mon–Fri** (closed US holidays). **Options only trade in this window** — no pre/after-hours for options (that's stocks only).
-
-| | Regular session |
-|---|---|
-| **ET** | 9:30 AM – 4:00 PM |
-| **UTC** (cron) | **13:30–20:00** (EDT/summer) · 14:30–21:00 (EST/winter) |
-| **IST** (local) | **7:00 PM – 1:30 AM** (summer) · 8:00 PM – 2:30 AM (winter) |
-
-⚠️ **DST gotcha:** US clocks shift in Mar & Nov, moving the UTC window ±1 hr. Fix: widen the cron window (e.g. `13-21`) *and* rely on the market-clock guard as the real gatekeeper.
-
-Concrete pieces:
-- **Schedule** in `.github/workflows/trade.yml`: `cron: "*/15 13-21 * * 1-5"` (every 15 min, covers both DST windows, weekdays). **GitHub cron is UTC** — independent of laptop clock.
-- **Market-clock guard** — first thing each run: call Alpaca's market-clock endpoint; if closed (wrong minute / holiday / weekend), exit immediately → harmless no-op. Handles holidays for free.
-- **Secrets** (Alpaca + Gemini keys) → repo Settings → Secrets, never in code.
-- **State between runs** — each run is a fresh empty machine, so:
-  - Positions → read fresh from **Alpaca account** each run (authoritative).
-  - Thesis log → **persist each run** (small JSON/SQLite). Persists *and* becomes a visible audit trail for judges.
-    - ⚠️ **Commit-noise:** ~10–15 runs/day committing to `main` would bury real code changes in the history. **Decision — keep logs off `main`:** push log updates to a dedicated **`bot-logs` branch**, *or* use **GitHub Actions Artifacts**, *or* write to a small **DB**. (Cadence is only ~10–15 checks/day and each run takes 5–10 min to load, so timing slack is a non-issue.)
-
-⚠️ **FLAG — GitHub Actions cron is not punctual.** On the free tier, scheduled runs fire on a *best-effort* basis: under load a `*/15` job can slip **10–25 min late**, occasionally skip a slot, or (rarely) not fire at all. **This is fine for us and the design must not assume on-the-minute wakes:**
-- The agent is **stateless + rehydrates every wake** (§ "wake cycle"), so a late run just reads *current* market data and decides — it never depends on "which exact slot am I in."
-- Never compute anything from wall-clock slot arithmetic (e.g. "it's been exactly 15 min since last run"). Derive everything from live account state + the market-clock guard.
-- Each wake already takes ~5–10 min to load/run, and we only need ~10–15 checks/day — so a few minutes' jitter is noise, not a bug.
-- **If punctuality ever matters** (it shouldn't here): fall back to Style B (always-on VM) or an external scheduler. Not needed for this project.
-
-Other caveats (all minor): min interval 5 min; workflow must be on the **default branch** to fire.
-
-**Alternative (Style B, spare-time upgrade):** free always-on VM (Oracle Cloud Always-Free / Google Cloud e2-micro) running the continuous loop or a persistent Alpaca CLI session. Real disk → local state "just works," feels more like a live bot, but more setup (SSH, `systemd`/`tmux` to keep it alive).
-
-> **Design consequence:** this commits us to the **cron/CLI headless style** — each wake is a short, self-contained script run, not a long-lived MCP session. Simpler to build.
-
-### MCP vs CLI for this mode
-- **MCP server** → the rich interactive brain (many tool calls, reasoning-heavy runs).
-- **Alpaca CLI** → lighter for the scheduled headless heartbeat ("cron jobs where MCP is heavier than needed"). Polish decision — either works.
-
-> Mental model: **MCP = hands (idle until called). Agent = brain (wakes on schedule, decides, sleeps). Scheduler = heartbeat spanning the 5–7 days. Alpaca account = memory of what you hold.**
-
----
-
-## 8. The 3 "wow" features that win the demo
-
-1. **Conviction scorecard** — transparent 0–100 from weighted signals; trades only above threshold. Looks disciplined, not lucky.
-2. **Self-grading thesis loop** — agent logs *why* it entered, then later reviews whether the thesis played out ("right on direction, wrong on timing"). Rare; screams "real agent."
-3. **Bull-vs-bear debate** — a bull agent and bear agent argue the trade; a judge agent decides. Kills one-shot hallucination; plays to multi-agent/LangChain strengths.
-
----
-
-## 9. Judging criteria & the P&L demo strategy
-
-**Judging criteria — 5 categories (no published weights):**
-1. **P&L Performance** — actual trading P&L in the paper account. *Submission requires the Alpaca account ID so judges verify your P&L.* → P&L genuinely counts.
-2. **Technology Implementation** — how well the project uses Trading API + MCP/CLI.
-3. **Creativity & Originality** — concept, strategy, agent behavior.
-4. **Presentation & Execution** — clarity of the demo + the reasoning shown.
-5. **Social engagement** — build-in-public posts (quality + likes/comments/shares).
-
-**Reframe:** P&L is real but it's **1 of 5**. Don't chase the P&L leaderboard (luck over a short window) — aim for **respectable/positive P&L + win the other four** (which are in our control).
-
-**⏰ Timing reality:** live judged window = **Aug 28 – Sep 4 = ~5–6 trading days**, measured on the **fresh account** (can't pre-run). All live P&L comes from one clean 5-day window. → Dial everything in on a **dev/throwaway account during Aug 18–28**; run the fresh account clean from Aug 28.
-
-**The problem:** naked long options are **low win-rate** (lose small often, win big rarely) — a bad profile for 5 days. Tilt toward a smoother curve:
-- **Higher-delta contracts (~0.60–0.70, near/in-the-money)** instead of cheap OTM lottery tickets → higher win rate, less theta.
-- **Take profits early (+25–40%)** → bank *realized* gains inside the window (realized green > unrealized).
-- **Cut losers fast**; treat **cash as a position** — in a risk-off week, stay mostly flat. A flat account beats a bleeding one, and "the agent knew not to trade" is a strong talking point.
-- **Don't swing for the fences** — modest consistent green + great process beats a gamble that may crater.
-
-**The hedge — backtest for the video:** 5 live days is noise. Show a **backtest of the signal engine over months of historical stock data** to prove the edge regardless of the live week.
-- ⚠️ **Data caveat (verified):** Alpaca option greeks/IV are **snapshot/live-only — no history.** Can't cleanly backtest *options* P&L historically. → Backtest the **directional signal on historical stock bars** (free/easy); approximate option outcomes.
-- ✅ **Verified good:** greeks (delta/gamma/theta/vega/rho) + IV are **free on paper**, options enabled by default → the *live* engine has all it needs.
-
-**Presentation (1 of 5, 100% in our control):** equity curve (live + backtest), 2–3 **hero trades** with full agent reasoning, **risk-gate-in-action**, **self-grading loop**, metrics dashboard (win rate, avg win/loss, max drawdown).
-
----
-
-## 10. Setup checklist (all free)
-
-- [ ] **Hugging Face token** — huggingface.co → Settings → Access Tokens (paid Inference Providers, funded by Yugo's ~$100). Pick model from [HF supported-models list](https://huggingface.co/inference/models).
-- [ ] **Gemini API key** — aistudio.google.com → "Get API key" (no billing) — free fallback
-- [ ] **Alpaca paper account** — alpaca.markets → sign up → generate paper keys
-- [ ] **Enable options trading** on the paper account (Level 1–3; Level 3 = spreads). Request early — approval can lag.
-- [ ] **Clone + run Alpaca MCP server** locally with paper keys
-- [ ] `.env` with all keys (so swapping accounts later = one edit)
-
-### Base URLs
-- Paper trading: `https://paper-api.alpaca.markets`
-- Market data: `https://data.alpaca.markets`
-
-### Package note
-Use **`alpaca-py`** (current SDK). Ignore `alpaca-trade-api` — it's deprecated.
-
----
-
-## 11. Submission rules & deliverables (don't get disqualified)
-
-**Required submission deliverables:** project title + short/long description, technology & category tags, cover image, **video presentation**, **slide presentation**, **public GitHub repo**, demo app platform + URL, **Alpaca paper account ID** (for P&L judging), up to **5 social post links**.
-
-- **Dev:** use any paper account during development.
-- **Submission (REQUIRED):** create a **brand-new, dedicated Alpaca paper account** for the final submission. Reused/existing accounts are **not eligible for judging**. → just swap keys in `.env` at the end.
-- **Build in Public (extra challenge, free points):** post progress on **X** and **LinkedIn**, tag **@lablabai / @AlpacaHQ** (LinkedIn: lablab.ai, Alpaca). Submit up to **5 post links** with final submission.
-  - Milestone posts: day-1 architecture → MCP wired up → first agent-placed trade → risk gate in action → final demo.
-  - Claude can help draft posts; user posts them (no auto-posting).
-
----
-
-## 12. Build milestones
-
-1. **Setup** — keys, options enabled, MCP server running locally.
-2. **Wire the brain** — Gemini LangChain/LangGraph agent loads MCP tools via `langchain-mcp-adapters`.
-3. **Risk gate** — `propose_trade` tool sits between LLM and MCP execute; enforce sizing/limits.
-4. **Decision engine** — implement conviction scorecard (Tier 1 + chosen Tier 2 metrics).
-5. **Thesis loop** — analyze → explain → risk-check → execute → log reasoning.
-6. **Self-grading** — post-trade review of logged theses.
-7. **(Stretch) bull/bear debate.**
-8. **Scheduled mode** — Alpaca CLI cron runtime.
-9. **Demo polish + fresh account swap + build-in-public posts.**
-
----
-
-## 13. Open questions / to verify
-
-- [x] **Judging criteria** — RESOLVED. 5 categories: P&L, Tech Implementation, Creativity/Originality, Presentation, Social. P&L is judged via submitted account ID. See §9.
-- [x] **Options data on free tier** — RESOLVED. Greeks (delta/gamma/theta/vega/rho) + IV available free on paper via option **snapshot** (live-only, no history). Options enabled by default. See §9.
-- [x] **Project folder** — CONFIRMED. Code + doc live in `C:\Users\chira\Desktop\alpaca-trading-agent\`, git repo pushed to `github.com/chiragshah2357/Alpaca-Trading-Hackathon`.
-- [ ] **HF model pick** — Chirag skimming [HF Inference Providers](https://huggingface.co/inference/models); shortlist **Kimi-K3 / DeepSeek-V4-Pro**. Decide which one (or which per-teammate mix for the bake-off) before build. **Cost is settled — see §13a below (spoiler: a non-issue).**
-- [ ] **Backtest scope** — decide how far to approximate options P&L historically given snapshot-only greeks (direction backtest on stock bars is the fallback).
-- [ ] **Watchlist** — finalize the ~20–40 liquid optionable names before Aug 28.
-
-### 13a. Model cost & free credits (RESOLVED — cost is not a constraint)
-
-**Per-token cost** (USD per 1M tokens on HF Inference Providers; ballpark — varies by which provider HF routes to):
-
-| Model | Input | Output | Context | Notes |
-|-------|-------|--------|---------|-------|
-| **DeepSeek V4 Pro** | ~$1.74 | ~$3.48 | large | Blended ~$2.17/M; some routes (OpenRouter) as low as ~$0.44 / ~$0.87 |
-| **DeepSeek V4 Flash** | ~$0.14 | ~$0.28 | 1M | Cheapest capable option — good for high-frequency steps |
-| **Kimi K2.6 / K3** | ~$0.95 | ~$4.00 | 256K | Long context; output is the pricey part |
-| **Qwen (7B class)** | ~$0.30 | ~$0.80 | 131K | Max / 235B-class costs more (not pinned exactly) |
-| **Llama 3.3 70B** | ~free | ~free | — | Already **free on Groq** — keep for cheap sentiment step |
-
-**The only number that matters:** our §6 budget is **~300k tokens/week**. Even on the priciest option (DeepSeek V4 Pro, ~$2.17/M blended) that's **~$0.65/week** → **~$2–5 total** across dev + the judged window, maybe **$15–20** if we 5× usage with debate loops across three test accounts. **Yugo's ~$100 is far more than enough — pick the best model, not the cheapest.**
-
-**Free-credit paths on HF** (for reference — we don't really need them given the above):
-- **Free tier:** ~$0.10/mo (~100K) Inference Provider credits — trial trickle only.
-- **PRO ($9/mo):** $2/mo credits + **2M monthly Inference Provider credits** + 25 min/day H200 ZeroGPU. The 2M allowance is the real perk.
-- **Startup perk:** some partner programs offer **6 months PRO free** for eligible startups — worth a look only if one of us qualifies.
-- **Keep the free levers we already have:** Gemini free tier (fallback brain) + Groq free tier (Llama for cheap sentiment) preserve the $100 almost entirely.
-
-> **Decision:** put the paid HF token on a **strong model (DeepSeek V4 Pro or Kimi K3)** for the thesis; route cheap high-frequency work to **Groq/Gemini free tiers**. Expected spend: a few dollars of the $100. Cost is closed as a concern.
+# Alpaca AI Trading Agent — Track 3: Hedging & Risk Protection
+
+> Master plan for our lablab.ai × Alpaca hackathon entry. We **pivoted from Track 1
+> (Options Alpha) to Track 3 (Hedging & Risk Protection)** — this doc is the single
+> source of truth: the strategy, how we actually make money, the model picks, the
+> harness question (OpenClaw / Hermes vs. our own loop), the runtime, and — most
+> importantly — the **full math engine** the agent runs on.
 >
-> *Figures gathered Aug 2026 from pricepertoken, morphllm, DeepInfra, and Hugging Face pricing pages — re-verify live before committing to a provider.*
+> Written in plain language on purpose. The only heavy part is §7 (the math), and
+> that's meant to be heavy — it's the core of the whole thing.
 
 ---
 
-## 14. Locked decisions (summary)
+## ⚠️ Read first — the Track 3 P&L trap
 
-> **Track 1 (Options Alpha) · paid HF Inference Provider brain (Kimi-K3 / DeepSeek-V4-Pro TBD, Gemini/Groq free fallback) funded by Yugo's ~$100 · Hybrid decision (LLM thesis + rule-based execution) · built on Alpaca MCP server via langchain-mcp-adapters · risk gate between brain and orders · multi-signal conviction engine with options-aware metrics · deterministic funnel keeps LLM tokens at the last mile · P&L-tuned for the 5-day judged window (higher-delta, take profits early, cash-is-a-position) + historical backtest for the video · self-grading thesis log · scheduled via GitHub Actions cron (headless, laptop-off) with market-clock guard + log kept off `main` (bot-logs branch / Artifacts / DB) · fresh paper account at submission · build-in-public posts throughout.**
+A hedge is **insurance.** In a calm or rising market it *costs* money (premium drag)
+and only pays off in a sell‑off. Over the **~5–6 day judged window**, if no crash
+happens, a naive hedging agent shows a **small loss** — worse for the P&L criterion
+than a directional bet. **This is the central design problem of Track 3,** and the
+whole plan is built to beat it:
 
-### 14a. Pre-event bake-off (Aug 18–28)
+- Hold an **appreciating base book** (net long) so a normal week is green; the hedge
+  is a small overlay, not the main position.
+- Use **collars** (near‑zero cost), not naked puts, to kill the drag.
+- Be **adaptive** — only pay for protection when stress is actually detected; sit
+  unhedged (zero drag) when calm.
+- **Prove the value with a historical‑crash backtest** in the video (§8), where the
+  hedge visibly saves the book.
+- **Compete on risk‑adjusted metrics** (max drawdown, volatility, Sharpe) — a hedger
+  wins on drawdown control even when raw P&L is modest.
 
-Provider swap is one `.env` edit, so we exploit the week before kickoff: **all three of us run the agent on our own paper accounts**, each tuned a bit differently — e.g. one **conservative** (higher conviction floor, lower deployment), one **more volatile/aggressive**, one middle. Three parallel dev sessions ≈ 3× the live-testing data. Come Aug 28 we **pick the best-performing config** and run it on the fresh submission account.
-
-- Optional **"demo-mode" safety valve** (Alok's idea): if the agent hasn't placed a single trade by ~Day 3 of the *judged* window, temporarily relax `MIN_CONVICTION` (e.g. 65 → 55) so judges have at least one or two small, safe live trades to grade. Keep it a deliberate, logged override — not the default.
+> Eyes open: if the team wants *raw* 5‑day P&L, Track 1 is the safer bet. Track 3
+> wins on **originality + presentation + defense narrative**, with P&L defended by
+> the tactics above and in §3.
 
 ---
 
-### Judging criteria → where we score (§9)
-| Criterion | Our play |
-|-----------|----------|
-| P&L Performance | Higher-delta + early profits + cash discipline over the 5-day window; don't gamble |
-| Technology Implementation | MCP server + CLI, the "core of the theme" |
-| Creativity & Originality | Multi-tier conviction engine, bull/bear debate, self-grading |
-| Presentation & Execution | Equity curve + hero trades + risk-gate-in-action + metrics dashboard |
-| Social engagement | Build-in-public posts at each milestone, tagging @lablabai / @AlpacaHQ |
+## 1. Why we switched to Track 3
+
+The original plan was **Track 1 (Options Alpha)** — the agent predicts which way a
+stock will go and buys a call or put. The problem Yugo kept pointing at (and he's
+right): predicting short‑term direction with technical indicators + an LLM is, in
+practice, **a coin flip dressed up in a nice story.** Worse, *buying* options is a
+losing game on average — you pay for "insurance" that's usually overpriced, and
+time decay bleeds you daily. No real edge.
+
+**Track 3 — Hedging & Risk Protection — fixes this.** The official task:
+
+> *"Build agents that protect portfolios using options overlays and adaptive risk
+> gates. This track rewards defense: agents that know **when** to step in, **how
+> much** protection to buy, and **when** to release a hedge that's no longer
+> needed."*
+
+Why this is a much better fit for us:
+
+- **It stops the LLM from guessing prices.** The agent no longer bets on direction.
+  It watches a portfolio, measures risk with hard math, and decides how much to
+  protect. Math does the numbers; the LLM only makes the judgment calls.
+- **It plays to an agent's real strengths** — a long‑running loop that observes,
+  plans, uses tools, and reacts, instead of a one‑shot fortune‑teller.
+- **It leans on what we're already best at** — the risk‑gate layer from the old
+  plan becomes the *whole product*, not a side feature.
+- **It can't be dismissed as a coin flip**, which is exactly the criticism we
+  needed to answer before locking a track.
+
+---
+
+## 2. What the agent actually does (in one paragraph)
+
+We hold a normal **basket of stocks/ETFs** (the "core book"). The agent's job is to
+**protect that book with options** and adjust the protection as conditions change.
+Every cycle it asks: *How much market risk am I carrying right now? Is that risk
+rising or falling? Do I have enough protection? Is protection cheap or expensive
+today? Should I add a hedge, hold, or take one off?* It answers with options
+overlays — mostly **collars** and **put spreads** — sized by math, chosen by the
+LLM, and logged so it can grade itself later.
+
+---
+
+## 3. How we make money (the honest version)
+
+A pure hedger **loses** money slowly — protection costs premium. So profit can't
+come from "buying insurance." It comes from three places:
+
+1. **The core book's normal returns.** We own stocks/ETFs; they go up over time.
+   The hedge just stops a bad week from wrecking us. In a *down* week, the hedge
+   pays off and we lose far less than the market — that's the hero story for judges.
+2. **Financing the hedge with collars.** A **collar** = own the stock + buy a put
+   (protection, costs money) + sell a call (income). The call income *pays for*
+   the put, often bringing the cost near **zero or a small credit.** So we get
+   protection with almost no drag. Collars are a listed Track‑3 strategy, so this
+   keeps us squarely in‑track.
+3. **Selling overpriced premium (the real edge).** Options are, on average,
+   *overpriced* (implied volatility usually ends up higher than what actually
+   happens — the "variance risk premium"). By being a **net seller** of premium
+   (the short‑call leg of collars, or defined‑risk put spreads) we harvest that
+   overpricing. This is a documented, repeatable edge — not a prediction.
+
+**Profit = core returns + collected premium − protection cost − any capped losses.**
+
+Realistic size on a $100k paper account over ~5 trading days: small — a fraction of
+a percent to maybe ~1–2%. **That's fine.** P&L is only 1 of 5 judging criteria, and
+Track 3 is judged on *defense quality*. The winning profile here is **steady, mostly
+green, no blow‑ups, with a clear risk story** — which short‑premium + hedging
+naturally produces (high win‑rate, small wins, and losses that are *capped* by
+design).
+
+---
+
+## 4. The agent loop
+
+```
+        ┌─────────────────────────────────────────────┐
+        │  every cycle (heartbeat / event trigger):    │
+        │                                              │
+        │  1. OBSERVE   read the book + market (MCP)    │
+        │  2. MEASURE   run the math engine (§7)        │  ← deterministic code
+        │  3. DECIDE    LLM sets the risk posture       │  ← the LLM's real job
+        │  4. EXECUTE   place/adjust options via MCP    │
+        │  5. MONITOR   check hedges, stops, expiries   │
+        │  6. LOG       write what it did + why         │  ← self‑grading trail
+        └─────────────────────────────────────────────┘
+```
+
+**The split that matters:**
+
+| Deterministic code owns (the math) | The LLM owns (the judgment) |
+|---|---|
+| Greeks, beta‑weighted delta, VaR, stress tests | *When* to step in (is this risk worth hedging now?) |
+| How many contracts to buy for X% coverage | *How much* protection (full vs. partial, given cost + regime) |
+| Whether protection is cheap (IV Rank) | *Which* structure (collar vs. put spread vs. roll) |
+| Hedge cost, coverage ratio, roll timing | *When* to release a hedge that's no longer needed |
+| All order sizing + risk limits | Reading news/events the numbers don't show yet, + writing the reasoning |
+
+This division is the answer to *"why is this an AI agent and not just a script?"* A
+script uses fixed thresholds; our agent adapts its posture over **both** the
+numbers **and** soft context (a Fed meeting tomorrow, a scary headline), and it
+explains every move.
+
+---
+
+## 5. Models (SOTA picks)
+
+We use **paid Hugging Face Inference Providers**, funded by Yugo's ~$100 in
+hackathon winnings. Two lanes:
+
+- **Reasoning brain → Kimi K3.** Strong agentic reasoning and finance knowledge;
+  it reportedly beats Claude Fable 5 on **τ³‑Banking** (a finance tool‑use
+  benchmark), which is exactly our domain. This is the model that reads the math
+  and makes the posture call.
+- **Fast lane → Gemma 4 31B on Cerebras.** For cheap, high‑frequency steps
+  (headline sentiment, quick checks). Cerebras is extremely fast — Yugo measured
+  **~780 tok/s** vs. ~54 tok/s for Opus 4.8 on Artificial Analysis. Caveat: the
+  free tier is now a one‑time **$5 trial** with an **8k‑token context cap**, so
+  it's a *fast‑lane* model, not the reasoning brain.
+- **Fallbacks:** Gemini (free tier) and Groq (Llama, free) stay available.
+
+Everything routes through one config seam (`agent/config.py` + `agent/llm.py`):
+the model for each role lives in `.env`, so we swap Kimi ↔ Gemma ↔ Gemini by
+editing one file — no code changes. Each teammate can run a different model for the
+bake‑off.
+
+---
+
+## 6. Harness & runtime
+
+### Harness — OpenClaw / Hermes vs. our own loop
+
+The **Alpaca MCP server + CLI are the *tools* ("hands")** — they place orders and
+read the account. They are **not** the agent loop. We still need a "brain loop" to
+drive them. Three options:
+
+- **Hermes** (Nous Research) — a model‑agnostic agent harness that **natively
+  speaks MCP**, and after each task **writes down what it tried, what worked, and
+  what failed.** That last part is basically our self‑grading loop for free, and
+  MCP‑native removes our integration worry.
+- **OpenClaw** — an autonomous agent framework whose signature **"heartbeat"**
+  (a scheduled self‑wake to monitor things) maps almost exactly onto our
+  observe‑and‑rebalance loop.
+- **Our own lean loop** — ~a couple hundred lines of Python: a simple cycle that
+  calls the model + MCP tools and checkpoints state. Modern, model‑driven, zero
+  integration risk, fully under our control.
+
+**Decision rule:** both Hermes and OpenClaw are powerful but **new (months old)**
+and carry a lot of machinery we won't use for a bounded hedging loop.
+- If **Yugo already runs Hermes/OpenClaw and owns the integration** → use it
+  (Hermes is the better fit: MCP‑native + its memory = our self‑grading loop).
+- If we'd have to **stand it up cold under a 1‑week deadline** → use our **own lean
+  loop** and rebuild the (simple) heartbeat + log ourselves.
+
+Either way, our model‑selection seam is harness‑agnostic, so we can start on the
+lean loop today and swap later. **The harness doesn't win the hackathon — the
+strategy and the demo do — so we won't sink the week into it.**
+
+### Runtime
+
+Move **off GitHub Actions cron** to an **always‑on runtime (Modal CPU).
+** Reason: a hedging agent needs *continuous* monitoring (stop‑losses, hedge
+drift, expiries), not a check every 15 minutes with gaps in between. "Event‑driven"
+means: subscribe to Alpaca's live stream for fills/quotes + a news trigger, and act
+when something actually happens. State is still checkpointed to a DB each cycle, so
+a crash just resumes.
+
+---
+
+## 7. The math engine (the heavy part)
+
+This is the deterministic core. **The LLM never does arithmetic** — Python computes
+all of this from Alpaca data, and the LLM reads the results to make its call.
+Everything below is standard, well‑understood options math. Worked examples use
+round numbers.
+
+> **Standing assumptions:** 252 trading days/year; "annual volatility" means the
+> annualized standard deviation of returns; each option contract = **100 shares**;
+> we ignore tiny effects (rho / interest rates) at this scale.
+
+### 7.1 The Greeks — what an option "feels"
+
+Every option has four sensitivities. These are the vocabulary for everything else.
+
+| Greek | Plain meaning | Why we care |
+|------|----------------|-------------|
+| **Delta (Δ)** | Price change per **$1** move in the stock. Calls 0→+1, puts 0→−1. | Delta ≈ "how many shares this option acts like." Also ≈ probability of finishing in‑the‑money. This is what we hedge. |
+| **Gamma (Γ)** | How fast **delta itself** changes as the stock moves. | High gamma = your hedge drifts quickly = you must rebalance more often. |
+| **Theta (Θ)** | Value lost **per day** from time decay. | When we *buy* a put, theta is a **cost**. When we *sell* a call, theta is **income**. |
+| **Vega (ν)** | Price change per **1‑point** move in implied volatility (IV). | Protection *gains* value when fear spikes (IV up). Long options are vega‑positive. |
+
+**Share‑equivalent exposure of one option** = `delta × 100`.
+Example: a put with delta **−0.40** behaves like being **short 40 shares**
+(`−0.40 × 100`).
+
+### 7.2 Beta‑weighted delta — the book's true market exposure
+
+Different stocks move by different amounts when the market moves. **Beta** measures
+that: beta 1.2 means the stock tends to move 1.2% when the market moves 1%. To know
+our real exposure we convert everything into **"SPY‑equivalent" dollars.**
+
+```
+Position market exposure ($)      = shares × price
+Beta‑weighted exposure ($ vs SPY) = shares × price × beta
+Portfolio delta ($)               = sum of beta‑weighted exposure across all positions
+```
+
+**Worked example.** We own 200 shares of a stock at $230, beta 1.2:
+
+```
+Market exposure       = 200 × $230           = $46,000
+Beta‑weighted vs SPY  = $46,000 × 1.2         = $55,200
+```
+
+Meaning: if SPY drops **1%**, this position is expected to lose about
+`$55,200 × 1% = $552`. Sum this across the whole book to get the portfolio's total
+SPY‑equivalent exposure — say it comes to **$112,000**. That single number is what
+we hedge.
+
+### 7.3 How much protection to buy — the hedge ratio
+
+To offset the book's delta with put options:
+
+```
+Contracts for a FULL hedge = portfolio delta (in SPY‑equivalent shares)
+                             ÷ ( |put delta| × 100 )
+```
+
+**Worked example.** Book exposure = **$112,000**, SPY at **$560**, so
+SPY‑equivalent shares = `112,000 ÷ 560 = 200 shares`. We pick a put with delta
+**−0.40**:
+
+```
+Full hedge = 200 ÷ (0.40 × 100) = 200 ÷ 40 = 5 contracts
+```
+
+We rarely hedge 100% (that's expensive and kills upside). For a **50% partial
+hedge** we'd buy `5 × 0.50 ≈ 2–3 contracts`. **How much to cover (the fraction) is
+exactly the judgment call the LLM makes** using the risk signals below.
+
+### 7.4 Value at Risk (VaR) — how bad is a *normal* bad day
+
+VaR estimates the loss we'd expect to be exceeded only rarely (e.g. 1 day in 20).
+
+```
+Daily volatility = annual volatility ÷ √252
+1‑day VaR ($)    = portfolio value × daily volatility × z
+      z = 1.65 for 95% confidence,  z = 2.33 for 99%
+```
+
+**Worked example.** $100,000 book, 20% annual volatility:
+
+```
+Daily vol = 0.20 ÷ √252 = 0.20 ÷ 15.87 = 1.26%
+95% VaR   = 100,000 × 0.0126 × 1.65 ≈ $2,079
+99% VaR   = 100,000 × 0.0126 × 2.33 ≈ $2,936
+```
+
+Read as: "on a normal bad day (~1 in 20) we'd expect to lose **at least ~$2,079**
+if unhedged." Rising VaR (because volatility jumped) is a **trigger to add
+protection.**
+
+### 7.5 Stress test — what a *shock* does, with and without the hedge
+
+VaR covers normal days; stress tests cover crashes. Pick a scenario (e.g. market
+**−5%**) and compute the damage both ways.
+
+**Worked example.** Book delta = $112,000; scenario SPY **−5%**:
+
+```
+Unhedged loss      = $112,000 × −5%              = −$5,600
+Hedge payoff       = puts gain roughly
+                     (put delta × shares × move)
+                   ≈ 5 contracts × 100 × 0.40 × ($560×5%)
+                   = 500 × 0.40 × $28              = +$5,600  (near full offset)
+Net with full hedge ≈ −$5,600 + $5,600           ≈  $0
+Net with 50% hedge  ≈ −$5,600 + $2,800           ≈ −$2,800
+```
+
+(Real hedges do *better* than this in a crash because falling markets spike IV,
+which lifts put value via **vega** — a bonus the linear estimate ignores.)
+
+### 7.6 Expected move — the market's own priced‑in range
+
+Implied volatility tells us how big a move the market is pricing. This sets sensible
+strike distances (don't pay for protection miles away, don't buy uselessly close).
+
+```
+Expected move over T days = Stock price × IV × √(T ÷ 252)
+```
+
+**Worked example.** SPY $560, IV 18%, T = 30 days:
+
+```
+Expected move = 560 × 0.18 × √(30 ÷ 252)
+              = 560 × 0.18 × √0.119
+              = 560 × 0.18 × 0.345 ≈ $34.8   (about ±6.2%)
+```
+
+So over the next month the market expects roughly **±$35**. A protective put around
+**$525** (one expected‑move down) is a natural, non‑wasteful strike.
+
+### 7.7 IV Rank — is protection cheap or expensive *today*
+
+Buying protection when it's cheap is a big part of the edge. IV Rank places today's
+IV inside its own past‑year range:
+
+```
+IV Rank = (current IV − 1‑yr low IV) ÷ (1‑yr high IV − 1‑yr low IV) × 100
+```
+
+**Worked example.** Current IV 18%, 1‑yr low 12%, 1‑yr high 40%:
+
+```
+IV Rank = (18 − 12) ÷ (40 − 12) × 100 = 6 ÷ 28 × 100 ≈ 21%
+```
+
+Low IV Rank (~21%) → **insurance is cheap → good time to buy puts.** High IV Rank →
+protection is expensive → prefer **spreads/collars** (where we also *sell* pricey
+premium) or wait. This is the agent's *"when to step in"* signal.
+
+### 7.8 Collar math — protection that pays for itself
+
+A **collar** on stock we own = **buy a put** (protection) + **sell a call** (income).
+
+```
+Net cost      = put premium − call premium     (often ≈ 0 or a credit)
+Max loss      = (stock − put strike) × 100 + net cost      (below the put)
+Max gain      = (call strike − stock) × 100 − net cost     (above the call)
+```
+
+**Worked example.** 100 shares of SPY at $560:
+
+```
+Buy  $540 put  @ $8.00  →  −$800   (protection)
+Sell $580 call @ $6.00  →  +$600   (income)
+Net cost = $800 − $600  =   $200    (just 0.36% of the $56,000 position)
+
+Max loss  = ($560 − $540)×100 + $200 = $2,000 + $200 = $2,200  (≈ 3.9%)
+Max gain  = ($580 − $560)×100 − $200 = $2,000 − $200 = $1,800
+```
+
+For $200 we've capped a $56k position's downside at ~3.9% — that's the collar doing
+the heavy lifting cheaply.
+
+### 7.9 Put‑spread math — cheaper, capped protection
+
+When we want protection but not the full put premium: **buy a put, sell a
+further‑out put.**
+
+```
+Cost (net debit)   = bought‑put premium − sold‑put premium
+Max protection ($) = (higher strike − lower strike) × 100 − net debit
+```
+
+**Worked example.** Buy $540 put @ $8.00, sell $520 put @ $4.00:
+
+```
+Net debit      = $800 − $400 = $400
+Max protection = ($540 − $520) × 100 − $400 = $2,000 − $400 = $1,600
+```
+
+Half the cost of the outright put ($400 vs $800), but protection only works between
+$540 and $520. Good when a *catastrophic* crash is unlikely and we just want to
+blunt an ordinary drop.
+
+### 7.10 Cost, coverage, and when to release
+
+Two ratios keep the whole book disciplined:
+
+```
+Coverage ratio  = hedged exposure ÷ total exposure        (target set by the LLM, e.g. 40–70%)
+Hedge cost drag = net premium spent ÷ portfolio value      (keep under a budget, e.g. ≤ ~1%/month)
+```
+
+**Release / roll rules (deterministic):**
+- **Release** a hedge when risk normalizes — IV Rank falls back down, beta‑weighted
+  delta drift is small, and any feared catalyst has passed.
+- **Roll** a hedge when it's near expiry (e.g. **DTE < 7**) or the put's delta has
+  decayed so far it no longer protects.
+- Always respect the risk‑gate caps: **≤ 2% premium per trade**, **≤ 30% of the
+  account** deployed in option premium at once, **≤ 5% per single underlying**, and a
+  **−5% daily‑loss halt** that benches the agent for the rest of the day.
+
+### 7.11 How the numbers drive the agent (putting it together)
+
+Each cycle the math engine emits a compact snapshot, e.g.:
+
+```
+portfolio_delta = +$112,000 (SPY‑equiv)
+95%_1d_VaR      = $2,079      (up 18% vs yesterday)
+stress_-5%      = −$5,600 unhedged / −$2,800 at current 50% coverage
+IV_Rank         = 21%         (protection is cheap)
+coverage_now    = 50%
+hedge_cost_drag = 0.4%/month
+catalyst        = CPI print in 2 days
+```
+
+The LLM reads that and decides, in words with reasons:
+> *"VaR is rising and there's a CPI print in two days, but IV Rank is low so
+> protection is cheap. Step coverage up from 50% → 70% using a $540/$520 put
+> spread (cheap, defined risk), keep the collar. Re‑evaluate after CPI."*
+
+Deterministic code then sizes and places it, and logs the whole thing for
+self‑grading. **Numbers measure; the model judges; the log remembers.**
+
+### 7.12 The Risk Score — one dial the whole hedge follows
+
+All the numbers above roll up into a single **Risk Score (0–100)** that sets the
+**hedge ratio** (how much of the book to protect). Calm = low score = little or no
+hedge (zero drag); stress = high score = step protection up. Two groups of inputs:
+
+**Portfolio risk (math on our own account):**
+- **Drawdown from peak** — how far the book is off its high‑water mark
+- **Beta‑weighted net delta** (§7.2) — the book's true market exposure
+- **Concentration** — single‑name / sector overweight
+- **Current coverage** (§7.10) — how much protection is already on
+
+**Market‑stress radar (the "when to step in" signals):**
+- **VIX level + spike** — the fear gauge; rising fast = step in
+- **Regime** — SPY below its 20/50‑day average = risk‑off
+- **Realized vs. implied vol** — is turbulence actually building?
+- **Correlation spike** — everything moving together = systemic risk (diversification
+  fails exactly when you need it)
+- **Breadth deterioration** — fewer names holding up
+- **Rising VaR / a scheduled catalyst** (§7.4, §7.6)
+
+```
+hedge ratio  ∝  Risk Score     (e.g. score < 25 → 0% ·  25–60 → partial ·  > 60 → full)
+Risk Score rises → step in  → buy / scale the hedge
+Risk Score falls → release  → unwind it to stop premium bleed
+```
+
+The math computes the score; the **LLM decides whether the score justifies acting
+right now**, given soft context. That step‑in / release discipline *is* the track.
+
+### 7.13 Fills & liquidity (paper‑trading reality)
+
+We *sell* premium (short call in a collar, short leg of a put spread), so a fair
+worry is "who buys it on a paper account?" **Nobody real has to** — paper trading
+doesn't match us to a counterparty; it **simulates fills against the real live market
+quotes (NBBO).** Practical rules that follow:
+
+- **Sell at or through the bid** (market or marketable‑limit orders) → fills reliably
+  at ~the real bid. A limit *above* the bid may sit unfilled until the real quote
+  moves to it — just like live.
+- **Liquid underlyings only** — SPY / QQQ / mega‑caps with tight, active quotes. On
+  illiquid contracts the real quote is wide/stale and paper fills get unreliable.
+  This *is* the liquidity gate.
+- **Marking & expiration use real prices**, so the premium‑selling edge genuinely
+  shows up in paper P&L — the strategy is truly testable, not fake.
+- **Paper is slightly optimistic** — it fills at the quote with no slippage / market
+  impact modeled, so live P&L runs a touch worse. Negligible at our small sizes on
+  liquid names; confirm real fill behavior on the **dev account (Aug 18–28)**.
+
+---
+
+## 8. Proving it works — the crash backtest & the demo
+
+Five live days is noise, and a calm week won't show the hedge working. So we **prove
+the value with a backtest**, and build the demo around *defense*, not raw P&L.
+
+**The crash backtest (video centerpiece).** Replay the signal + hedge engine through
+real historical stress — **COVID Mar‑2020, the 2022 bear, the Aug‑2024 vol spike** —
+and show two equity curves: **unhedged vs. hedged.** The hedge visibly cushions the
+drop. This is what proves the agent works even if the live window is quiet.
+> Data note: Alpaca option greeks/IV are snapshot‑only (no history), so we backtest
+> the **signals + hedge decisions on historical price/vol** and approximate the
+> option payoffs.
+
+**The three "wow" features (all defense‑framed):**
+1. **Adaptive hedge timeline** — a visual of the agent *stepping in* as risk rose and
+   *releasing* as it fell, with the logged reasoning at each step. The money shot.
+2. **Hedged‑vs‑unhedged crash curves** — the backtest above.
+3. **Risk‑regime reasoning + self‑grading** — the agent explains *why* it hedged, then
+   grades whether the protection was worth its cost ("bought insurance, market held —
+   small drag, correct discipline" vs. "hedge saved 8%").
+
+**Where we score** (judging is 5 criteria: P&L, Tech, Creativity, Presentation,
+Social): lead with **risk‑adjusted metrics** (max drawdown, volatility, Sharpe) where
+a hedger genuinely wins; a "cost of protection vs. drawdown avoided" dashboard; and a
+live risk‑regime gauge. Creativity + Presentation are our strongest categories here.
+
+---
+
+## 9. Build milestones
+
+1. **Setup** — keys, Alpaca paper account (options enabled; request **Level 3** for
+   spreads early — approval can lag), MCP server running, seed the base book (SPY/QQQ).
+2. **Risk engine** — portfolio risk + stress signals → the **Risk Score** (§7.12), all
+   deterministic math.
+3. **Hedge gate** — hedge‑ratio rules, collar / put‑spread construction, step‑in /
+   release logic, risk caps.
+4. **LLM layer** — Kimi K3 reads the Risk Score + news and decides posture, with
+   reasons (via the `agent/llm.py` seam).
+5. **Adaptive loop** — wire observe→measure→decide→execute→monitor on the heartbeat /
+   event runtime (§6).
+6. **Backtest** — hedged vs. unhedged through a historical crash (the video centerpiece).
+7. **Self‑grading + dashboards** — cost‑vs‑protection, risk‑regime gauge, timeline.
+8. **Demo polish + fresh paper account swap + build‑in‑public posts.**
+
+---
+
+## 10. Locked / open decisions
+
+**Locked (this doc):**
+- **Track 3** — Hedging & Risk Protection, run as *risk‑managed premium harvesting*.
+- **Core book** = a defined basket of stocks/ETFs the agent protects (not
+  discretionary stock‑picking).
+- **Models** — Kimi K3 (reasoning) + Gemma 4 31B on Cerebras (fast lane), paid HF,
+  cost non‑issue.
+- **Runtime** — always‑on (Modal), event‑driven + heartbeat, state checkpointed.
+- **Profit engine** — core returns + financed collars + selling overpriced premium.
+- **Math engine** — §7 above, all deterministic.
+
+**Open (need Yugo / a decision):**
+- **Harness** — Hermes/OpenClaw *only if Yugo already runs it and owns integration*;
+  otherwise our own lean loop.
+- **The core book** — finalize the exact tickers (liquid, optionable mega‑caps +
+  a couple of ETFs).
+- **Coverage bands** — default min/max coverage % and the hedge‑cost budget.
+- **Exact model ids** — confirm against the HF Inference Providers list.
+
+---
+
+## 11. One‑paragraph summary (for the pitch)
+
+*Our agent runs a real portfolio and protects it like a disciplined risk manager.
+Hard math measures the book's exposure, its value‑at‑risk, and whether insurance is
+cheap right now; a strong reasoning model (Kimi K3) reads those numbers plus live
+news and decides when to step in, how much to protect, and when to lift a hedge —
+using collars and defined‑risk spreads that mostly pay for themselves. It runs
+continuously, reacts to events, caps every downside by design, and writes down its
+reasoning so it can grade itself. It never guesses which way the market will go —
+it just makes sure a bad day can't hurt us, and quietly collects premium while it
+waits.*
