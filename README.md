@@ -45,6 +45,7 @@
 - **Free-tier fallback / cost saver:**
   - **Gemini** (Google AI Studio free tier — strong reasoning, huge context for RAG) — still viable if we want to preserve HF budget.
   - **Groq** (Llama 3.3 70B — ultra-fast) for cheap high-frequency steps like headline sentiment.
+    - *Alt fast-lane:* **Gemma-via-Cerebras** — a viable Groq substitute for the cheap high-frequency lane only, **not** the thesis brain (Gemma 4 31B is a tier below DeepSeek/Kimi on agentic reasoning). Caveats: free tier is now a one-time **$5 trial** (not the old 1M/day) with a hard **8k-token context cap** → too tight for the RAG/debate thesis step; paid Gemma escapes the cap but buys a weaker model at similar cost.
 - **Swappable** via LangChain — the provider is one `.env` edit / one adapter swap, so each teammate can run a *different* brain on their own account for the bake-off (see §14a).
 - **Decision style:** **Hybrid** — LLM forms the thesis; deterministic code enforces risk and executes. Judges reward visible guardrails; a pure-LLM order-placer reads as reckless.
 
