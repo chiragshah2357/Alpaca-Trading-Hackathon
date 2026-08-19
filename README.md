@@ -214,7 +214,36 @@ round numbers.
 > annualized standard deviation of returns; each option contract = **100 shares**;
 > we ignore tiny effects (rho / interest rates) at this scale.
 
-### 7.0 Metric catalog — everything the engine uses, by tier
+### 7.0 The must-build essentials — the ~40–50% that carries the demo
+
+**Build only this and the agent still runs end-to-end and demos well:** a base book
+that gets protected, a Risk Score that visibly steps the hedge in and out, and a
+decision log. Everything else in the full catalog (§7.0.1) is **credibility + roadmap**
+— described in the pitch, built only if time allows. This is the MVP subset of Core.
+
+| # | Must-build | Why it's essential | § |
+|---|---|---|---|
+| 1 | **Delta** (Greek) | The exposure we hedge; share-equiv = delta × 100 | 7.1 |
+| 2 | **Beta-weighted delta** | The book's true SPY-equivalent exposure (sizing basis) | 7.2 |
+| 3 | **EWMA realized volatility** | The live vol number that feeds risk | 7.4 |
+| 4 | **Drawdown from peak** | Core stress signal — how far off the high | 7.12 |
+| 5 | **Regime — SPY vs 50-day MA** | Risk-on / risk-off signal | 7.12 |
+| 6 | **Basic VaR** | Headline "normal bad day" loss | 7.4 |
+| 7 | **Risk Score (0–100)** | Composite of the signals — the dial that drives everything | 7.12 |
+| 8 | **Step-in / release thresholds** | Risk Score → target coverage %; the adaptive logic | 7.12 |
+| 9 | **Hedge ratio (delta-match)** | How many puts for the target coverage | 7.3 |
+| 10 | **Coverage ratio** | How much of the book is protected right now | 7.10 |
+| 11 | **Expected move (from IV)** | Sets the put strike distance | 7.6 |
+| 12 | **IV Rank** | Is protection cheap right now (time the buy) | 7.7 |
+| 13 | **Protective-put payoff** | Cost, max loss, break-even — the instrument | 7.8 |
+| 14 | **Theta** (Greek) | Daily cost of holding protection (drag awareness) | 7.1 |
+| 15 | **Hedge-cost drag** | Protection spend as % — the budget cap | 7.10 |
+
+**The vertical slice:** base book → Risk Score → protective-put hedge that steps in
+and out. Single-leg puts (Level 1), one model, a scheduled loop — **no** collars, ES,
+GARCH, PCA, VRP, or harness. Pull items up from §7.0.1 only as spare time appears.
+
+### 7.0.1 The full metric catalog (everything, by tier)
 
 The full quant toolkit, tagged **Core** (built for the submission) or **Stretch** (the
 advanced "wow" layer, added if time allows). Bold rows are the upgrades that lift this
