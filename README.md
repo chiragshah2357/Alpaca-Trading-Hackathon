@@ -214,6 +214,43 @@ round numbers.
 > annualized standard deviation of returns; each option contract = **100 shares**;
 > we ignore tiny effects (rho / interest rates) at this scale.
 
+### 7.0 Metric catalog — everything the engine uses, by tier
+
+The full quant toolkit, tagged **Core** (built for the submission) or **Stretch** (the
+advanced "wow" layer, added if time allows). Bold rows are the upgrades that lift this
+from intro-level to a real risk engine. Detail + worked examples follow in 7.1–7.13;
+the Stretch items are specced in §7.14.
+
+| Concept | What it does | Tier |
+|---|---|---|
+| Greeks (Δ, Γ, Θ, ν) | Option sensitivities — the vocabulary for everything | Core |
+| Beta-weighted delta | The book's true market ($SPY-equiv) exposure | Core |
+| **Downside (semi-)beta** | Exposure measured only in *down* markets — what we hedge | Core |
+| Hedge ratio (delta-match) | Contracts needed for a target coverage % | Core |
+| **OLS minimum-variance hedge ratio** | Statistically optimal hedge size (regression) | Core |
+| **EWMA volatility** | Dynamic vol forecast (clustering), not a constant | Core |
+| Value at Risk (VaR) | Loss threshold on a normal bad day | Core |
+| **Fat-tail VaR (Cornish-Fisher / historical)** | VaR adjusted for skew + kurtosis | Core |
+| **Expected Shortfall (ES / CVaR)** | Average loss *once* the tail breaks — coherent | Core |
+| Stress test / scenario P&L | Loss under a −X% shock, hedged vs unhedged | Core |
+| Expected move | IV-implied range → sensible strike distance | Core |
+| IV Rank | Is protection cheap vs its own past year | Core |
+| **Variance Risk Premium (implied − realized)** | The premium-selling edge, quantified | Core |
+| **IV skew (put side)** | Cost of crash protection → skew-aware strikes | Core |
+| Collar / put-spread payoff | Net cost, max loss/gain, break-evens | Core |
+| Coverage ratio & hedge-cost drag | Discipline ratios (how much / how costly) | Core |
+| Risk Score (0–100) | Composite that sets the hedge ratio | Core |
+| Fills & liquidity model | Paper NBBO fill assumptions + liquidity gate | Core |
+| GARCH(1,1) volatility | Richer vol forecast than EWMA (mean-reverting) | Stretch |
+| Monte Carlo VaR | Simulated tail distribution vs. closed-form | Stretch |
+| Conditional Drawdown-at-Risk (CDaR) | Path-dependent tail (peak-to-trough) | Stretch |
+| Delta-gamma hedging | Convexity-aware hedge for large moves | Stretch |
+| Component / marginal VaR | Where portfolio risk is concentrated | Stretch |
+| Absorption Ratio (PCA) | Systemic-fragility gauge — are things coupling? | Stretch |
+| Avg pairwise correlation / dispersion | Correlation-regime detection | Stretch |
+| VIX term structure (contango/backwardation) | Cheap macro stress trigger | Stretch |
+| Factor decomposition (mkt/size/value/mom) | Hedge factor exposures, not just index delta | Stretch |
+
 ### 7.1 The Greeks — what an option "feels"
 
 Every option has four sensitivities. These are the vocabulary for everything else.
@@ -253,6 +290,13 @@ Meaning: if SPY drops **1%**, this position is expected to lose about
 SPY‑equivalent exposure — say it comes to **$112,000**. That single number is what
 we hedge.
 
+> **Core upgrade — downside (semi-)beta.** Ordinary beta is an *average*; a hedger
+> cares how the book behaves specifically when the market *falls*. **Downside beta**
+> is the same regression run only over down-market days (market return < 0). For
+> equities it's usually *higher* than plain beta, so plain beta **understates** the
+> exposure we most need to hedge. We beta-weight the book with downside beta for
+> sizing the hedge.
+
 ### 7.3 How much protection to buy — the hedge ratio
 
 To offset the book's delta with put options:
@@ -273,6 +317,16 @@ Full hedge = 200 ÷ (0.40 × 100) = 200 ÷ 40 = 5 contracts
 We rarely hedge 100% (that's expensive and kills upside). For a **50% partial
 hedge** we'd buy `5 × 0.50 ≈ 2–3 contracts`. **How much to cover (the fraction) is
 exactly the judgment call the LLM makes** using the risk signals below.
+
+> **Core upgrade — minimum-variance hedge ratio.** Delta-matching assumes the hedge
+> moves 1:1 with the book; it doesn't. The statistically optimal amount is the
+> regression (OLS) hedge ratio:
+> ```
+> h* = Cov(ΔBook, ΔHedge) ÷ Var(ΔHedge)  =  ρ × (σ_book ÷ σ_hedge)
+> ```
+> It's the slope of book returns on hedge returns — the hedge quantity that minimises
+> the *variance* of the combined position. We use `h*` to scale the delta-based
+> contract count; the LLM still sets what *fraction* of `h*` to actually deploy.
 
 ### 7.4 Value at Risk (VaR) — how bad is a *normal* bad day
 
@@ -295,6 +349,26 @@ Daily vol = 0.20 ÷ √252 = 0.20 ÷ 15.87 = 1.26%
 Read as: "on a normal bad day (~1 in 20) we'd expect to lose **at least ~$2,079**
 if unhedged." Rising VaR (because volatility jumped) is a **trigger to add
 protection.**
+
+> **Core upgrades — a real tail model.** The basic VaR above assumes constant, normal
+> volatility. Markets are neither, and a hedger lives in the tail, so we sharpen all
+> three parts:
+>
+> - **EWMA volatility** (RiskMetrics) — vol *clusters*, so forecast it instead of
+>   using a trailing constant:  `σ²ₜ = λ·σ²ₜ₋₁ + (1−λ)·r²ₜ₋₁`,  λ ≈ 0.94.  This same
+>   live vol feeds VaR, the expected move (§7.6), and the "turbulence building?" signal.
+> - **Fat-tail VaR (Cornish-Fisher / historical).** Equity returns are left-skewed and
+>   fat-tailed, so normal VaR *understates* crash risk. Cornish-Fisher bumps the
+>   z-score for skewness + kurtosis; historical VaR just reads the empirical quantile
+>   of real returns. Either pushes the number toward honesty.
+> - **Expected Shortfall (ES / CVaR)** — VaR is only a *threshold*; ES is the **average
+>   loss once you breach it** (`ES₉₅ = mean loss beyond the 95% VaR`). It's the
+>   coherent, Basel-standard tail measure and the right thing for a hedger to target.
+>
+> **Illustrative feel.** With −0.7 skew and fat tails, a 99% VaR that normal math calls
+> ~$2,936 lands nearer **~$3,600** under Cornish-Fisher, with **ES₉₉ ≈ $4,500** — the
+> real bad-day pain is ~50% worse than the naive number. That gap *is* the reason to
+> hedge, and why the basic VaR alone isn't enough.
 
 ### 7.5 Stress test — what a *shock* does, with and without the hedge
 
@@ -354,6 +428,16 @@ IV Rank = (18 − 12) ÷ (40 − 12) × 100 = 6 ÷ 28 × 100 ≈ 21%
 Low IV Rank (~21%) → **insurance is cheap → good time to buy puts.** High IV Rank →
 protection is expensive → prefer **spreads/collars** (where we also *sell* pricey
 premium) or wait. This is the agent's *"when to step in"* signal.
+
+> **Core upgrades — price the edge, not just the rank.**
+> - **Variance Risk Premium (VRP) = implied − realized variance** (or IV − realized
+>   vol). This *is* our edge as a number: when implied sits well above what actually
+>   happened, premium is genuinely overpriced and selling it pays. IV Rank says "high
+>   vs its own year"; VRP says "overpriced vs *reality*" — a better sell/hold trigger.
+> - **IV skew (put side).** The vol surface isn't flat — downside puts trade at higher
+>   IV than ATM. The **skew** (e.g. 25-delta put IV − ATM IV) says how *expensive crash
+>   protection is right now*, so we pick strikes off the skew instead of a flat
+>   "one expected-move down." Steep skew → protection is dear → prefer spreads/collars.
 
 ### 7.8 Collar math — protection that pays for itself
 
@@ -488,6 +572,28 @@ quotes (NBBO).** Practical rules that follow:
 - **Paper is slightly optimistic** — it fills at the quote with no slippage / market
   impact modeled, so live P&L runs a touch worse. Negligible at our small sizes on
   liquid names; confirm real fill behavior on the **dev account (Aug 18–28)**.
+
+### 7.14 The Stretch layer (build last, if time allows)
+
+One line each — these turn a solid risk engine into an institutional-grade one:
+
+- **GARCH(1,1) volatility** — `σ²ₜ = ω + α·r²ₜ₋₁ + β·σ²ₜ₋₁`; a vol forecast with
+  mean-reversion, a step beyond EWMA.
+- **Monte Carlo VaR** — simulate thousands of return paths from the fitted
+  vol/correlations and read the tail, instead of a closed-form quantile.
+- **Conditional Drawdown-at-Risk (CDaR)** — the expected worst peak-to-trough drawdown
+  in the tail; path-dependent, closer to felt pain than 1-day VaR.
+- **Delta-gamma hedging** — hedge `ΔV ≈ Δ·ΔS + ½·Γ·ΔS²`, not just delta, so the hedge
+  holds up on *large* moves.
+- **Component / marginal VaR** — split total VaR into each position's contribution
+  (`CVaRᵢ = wᵢ · ∂VaR/∂wᵢ`); hedge the concentrated names first.
+- **Absorption Ratio (Kritzman–Li)** — fraction of the book's variance explained by its
+  top PCA eigenvectors; a spike = everything coupling = fragile market = step in.
+- **Avg pairwise correlation / dispersion** — a proper coupling gauge for the stress radar.
+- **VIX term structure** — VIX futures in backwardation (front > back) is a strong,
+  cheap risk-off trigger.
+- **Factor decomposition** — regress the book on market/size/value/momentum factors and
+  hedge the factor exposures, not just index delta.
 
 ---
 
