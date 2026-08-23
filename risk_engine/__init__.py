@@ -28,6 +28,7 @@ from .payoffs import (
     ProtectivePutPayoff,
     PutSpreadPayoff,
     StressResult,
+    bear_call_spread_payoff,
     bull_put_spread_payoff,
     cash_secured_put_payoff,
     collar_payoff,
@@ -65,5 +66,6 @@ __all__ = [
     "covered_call_payoff",
     "cash_secured_put_payoff",
     "bull_put_spread_payoff",
+    "bear_call_spread_payoff",
     "stress_pnl",
 ]

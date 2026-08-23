@@ -158,13 +158,18 @@ def plan_strategy(
     market: MarketData,
     snapshot: RiskSnapshot,
     current_contracts: int = 0,
-    expiry_days: int = 30,
+    income_dte: int = 7,
+    hedge_dte: int = 30,
 ) -> StrategyPlan:
-    """Combine the income overlay and the hedge overlay into one decision (§3, §7)."""
-    income = plan_income(portfolio, market, snapshot, expiry_days=expiry_days)
+    """Combine the income overlay and the hedge overlay into one decision (§3, §7).
+
+    Income sells weekly (`income_dte`) to harvest fast time decay; the hedge uses a
+    longer-dated put (`hedge_dte`) so protection stays alive across the window.
+    """
+    income = plan_income(portfolio, market, snapshot, expiry_days=income_dte)
     hedge = plan_hedge(
         portfolio, market, snapshot,
-        current_contracts=current_contracts, expiry_days=expiry_days,
+        current_contracts=current_contracts, expiry_days=hedge_dte,
     )
     hedge_theta_total = hedge.theta_per_day * hedge.contracts_target  # negative (cost)
     net_theta = income.net_theta_per_day + hedge_theta_total
