@@ -112,3 +112,40 @@ def vega_per_point(S: float, K: float, T: float, r: float, sigma: float) -> floa
     if T <= 0 or sigma <= 0:
         return 0.0
     return S * _norm_pdf(_d1(S, K, T, r, sigma)) * math.sqrt(T) / 100.0
+
+
+# --- Strike selection by target delta (how a desk actually picks strikes) ---
+#
+# Income desks don't quote a strike, they quote a *delta*: "sell the 30-delta call."
+# Both option deltas are monotonic in the strike (call delta falls as K rises; put
+# delta also falls — more negative — as K rises), so a bisection inverts them cleanly.
+
+
+def strike_for_call_delta(
+    S: float, target_delta: float, T: float, r: float, sigma: float, iters: int = 64
+) -> float:
+    """Strike whose call has delta ≈ `target_delta` (0..1). Used to sell N-delta calls."""
+    target = abs(target_delta)
+    lo, hi = S * 0.5, S * 1.5  # call delta is decreasing in K
+    for _ in range(iters):
+        mid = 0.5 * (lo + hi)
+        if call_delta(S, mid, T, r, sigma) > target:
+            lo = mid  # delta too high -> need a higher (further-OTM) strike
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def strike_for_put_delta(
+    S: float, target_delta: float, T: float, r: float, sigma: float, iters: int = 64
+) -> float:
+    """Strike whose put has delta ≈ `-|target_delta|`. Used to sell N-delta puts."""
+    target = -abs(target_delta)
+    lo, hi = S * 0.5, S * 1.5  # put delta is decreasing in K
+    for _ in range(iters):
+        mid = 0.5 * (lo + hi)
+        if put_delta(S, mid, T, r, sigma) > target:
+            lo = mid  # delta not negative enough -> need a higher strike (closer to spot)
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)

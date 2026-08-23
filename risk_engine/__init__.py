@@ -10,7 +10,8 @@ Pure standard library (math/statistics/dataclasses) so it runs with zero install
 from __future__ import annotations
 
 from .types import HedgePlan, MarketData, Portfolio, Position, RiskSnapshot
-from .engine import assess, plan_hedge
+from .income import IncomeLeg, IncomePlan, plan_income
+from .engine import StrategyPlan, assess, plan_hedge, plan_strategy
 from .book import (
     DEFAULT_BOOK,
     BookEntry,
@@ -20,11 +21,17 @@ from .book import (
     target_cash_weight,
 )
 from .payoffs import (
+    CashSecuredPutPayoff,
     CollarPayoff,
+    CoveredCallPayoff,
+    CreditSpreadPayoff,
     ProtectivePutPayoff,
     PutSpreadPayoff,
     StressResult,
+    bull_put_spread_payoff,
+    cash_secured_put_payoff,
     collar_payoff,
+    covered_call_payoff,
     protective_put_payoff,
     put_spread_payoff,
     stress_pnl,
@@ -38,13 +45,25 @@ __all__ = [
     "HedgePlan",
     "assess",
     "plan_hedge",
+    # income overlay — the P&L engine (§3, §7.7-7.9)
+    "IncomeLeg",
+    "IncomePlan",
+    "plan_income",
+    "StrategyPlan",
+    "plan_strategy",
     # payoffs (§7.5, §7.8, §7.9)
     "ProtectivePutPayoff",
     "CollarPayoff",
     "PutSpreadPayoff",
+    "CoveredCallPayoff",
+    "CashSecuredPutPayoff",
+    "CreditSpreadPayoff",
     "StressResult",
     "protective_put_payoff",
     "collar_payoff",
     "put_spread_payoff",
+    "covered_call_payoff",
+    "cash_secured_put_payoff",
+    "bull_put_spread_payoff",
     "stress_pnl",
 ]

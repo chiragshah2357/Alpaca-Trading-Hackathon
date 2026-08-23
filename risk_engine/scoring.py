@@ -52,3 +52,27 @@ def target_coverage(score: float) -> float:
     if score < COVER_MIN:
         return 0.0
     return clip((score - COVER_MIN) / (COVER_FULL - COVER_MIN), 0.0, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Income posture — the *inverse* dial to the hedge (README §3 profit engine).
+# Sell premium when IV is genuinely rich AND the market is calm; stop selling as
+# the regime turns risk-off (you don't want to be short premium into a crash).
+# ---------------------------------------------------------------------------
+
+IVR_FLOOR, IVR_CEIL = 20.0, 80.0  # IV Rank band over which selling ramps 0 -> full
+VRP_DISCOUNT = 0.25  # if implied < realized (VRP <= 0) premium isn't truly rich: throttle
+
+
+def income_aggressiveness(iv_rank: float, vrp: float, regime: float) -> float:
+    """How hard to harvest premium this cycle, 0..1 (§7.7).
+
+    Rises with IV Rank (rich vs its own year), gated by a positive variance risk
+    premium (implied richer than realized), and damped to zero as the regime turns
+    risk-off. This is the mirror image of `target_coverage`: calm+rich -> harvest;
+    stress -> pull in and let the hedge take over.
+    """
+    richness = clip((iv_rank - IVR_FLOOR) / (IVR_CEIL - IVR_FLOOR), 0.0, 1.0)
+    vrp_factor = 1.0 if vrp > 0.0 else VRP_DISCOUNT
+    regime_damp = clip(1.0 - regime, 0.0, 1.0)
+    return clip(richness * vrp_factor * regime_damp, 0.0, 1.0)

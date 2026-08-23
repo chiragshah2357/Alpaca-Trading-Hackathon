@@ -6,8 +6,11 @@ an LLM — they're the deterministic core the rest of the agent is built on.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from . import blackscholes as bs
 from . import metrics, scoring
+from .income import IncomePlan, plan_income
 from .types import HedgePlan, MarketData, Portfolio, RiskSnapshot
 
 
@@ -108,4 +111,68 @@ def plan_hedge(
         hedge_cost_drag=drag,
         theta_per_day=theta_day_contract,
         full_hedge_contracts=full_contracts,
+    )
+
+
+@dataclass(frozen=True)
+class StrategyPlan:
+    """The unified per-cycle decision: income overlay + hedge overlay + net carry.
+
+    This is what the LLM/agent presents and the executor acts on — the income legs
+    generate P&L, the hedge caps the tail, and `net_theta_per_day` / `net_cost_today`
+    show whether the book is being *paid* to hold its posture (positive carry) or is
+    paying up for protection (a stressed cycle).
+    """
+
+    posture: str                 # short human summary of the cycle's stance
+    income: IncomePlan
+    hedge: HedgePlan
+    net_theta_per_day: float     # income decay collected − hedge decay paid ($/day)
+    net_cost_today: float        # hedge premium spent − income credit collected ($)
+
+    def as_lines(self) -> list[str]:
+        carry = "positive carry" if self.net_theta_per_day >= 0 else "negative carry"
+        return [
+            f"POSTURE           = {self.posture}",
+            f"net_theta/day     = {self.net_theta_per_day:+,.0f}/day  ({carry})",
+            f"net_cost_today    = ${self.net_cost_today:+,.0f}   "
+            f"(credit ${self.income.total_credit:,.0f} - hedge ${self.hedge.total_cost:,.0f})",
+        ]
+
+
+def _posture(snapshot: RiskSnapshot, income: IncomePlan, hedge: HedgePlan) -> str:
+    """One-line stance for the cycle, from which overlay is doing the work."""
+    harvesting = income.total_credit > 0.0
+    hedging = hedge.contracts_target > 0
+    if hedging and harvesting:
+        return "HARVEST + HEDGE (rich IV, rising risk)"
+    if hedging:
+        return "DEFEND (risk-off - hedge stepped in, income stood down)"
+    if harvesting:
+        return "HARVEST (rich IV, calm - sell premium, minimal hedge)"
+    return "SIT (cheap IV, calm - nothing to sell, nothing to fear)"
+
+
+def plan_strategy(
+    portfolio: Portfolio,
+    market: MarketData,
+    snapshot: RiskSnapshot,
+    current_contracts: int = 0,
+    expiry_days: int = 30,
+) -> StrategyPlan:
+    """Combine the income overlay and the hedge overlay into one decision (§3, §7)."""
+    income = plan_income(portfolio, market, snapshot, expiry_days=expiry_days)
+    hedge = plan_hedge(
+        portfolio, market, snapshot,
+        current_contracts=current_contracts, expiry_days=expiry_days,
+    )
+    hedge_theta_total = hedge.theta_per_day * hedge.contracts_target  # negative (cost)
+    net_theta = income.net_theta_per_day + hedge_theta_total
+    net_cost = hedge.total_cost - income.total_credit
+    return StrategyPlan(
+        posture=_posture(snapshot, income, hedge),
+        income=income,
+        hedge=hedge,
+        net_theta_per_day=net_theta,
+        net_cost_today=net_cost,
     )
