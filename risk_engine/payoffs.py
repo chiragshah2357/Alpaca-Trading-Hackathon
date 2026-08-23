@@ -243,6 +243,28 @@ def bull_put_spread_payoff(
     )
 
 
+def bear_call_spread_payoff(
+    short_strike: float,
+    long_strike: float,
+    short_premium: float,
+    long_premium: float,
+    shares: int = SHARES,
+) -> CreditSpreadPayoff:
+    """Net credit and defined max loss of a bear call (credit) spread — the call side
+    of an iron condor. Sell the lower `short_strike` call, buy the higher `long_strike`
+    call for protection.
+    """
+    net_credit = (short_premium - long_premium) * shares
+    width = (long_strike - short_strike) * shares
+    return CreditSpreadPayoff(
+        net_credit=net_credit,
+        max_loss=width - net_credit,
+        breakeven=short_strike + net_credit / shares,
+        short_strike=short_strike,
+        long_strike=long_strike,
+    )
+
+
 def stress_pnl(
     beta_weighted_delta: float,
     shock_pct: float,

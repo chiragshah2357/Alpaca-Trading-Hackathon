@@ -54,23 +54,26 @@ def plan_hedge(
     market: MarketData,
     snapshot: RiskSnapshot,
     current_contracts: int = 0,
-    expiry_days: int = 30,
+    expiry_days: int = 14,
+    target_put_delta: float = 0.35,
     strike_pct_otm: float | None = None,
 ) -> HedgePlan:
     """Size a protective-put hedge to reach the snapshot's target coverage.
 
-    Strike defaults to ~one expected move below spot (§7.6); pass `strike_pct_otm`
-    (e.g. 0.05) to fix a %-OTM strike instead.
+    Tuned for a short window: buys a *responsive* ~`target_put_delta` put (not a deep-OTM
+    tail lottery that barely moves in 5 days) at a short `expiry_days` (less time-value
+    drag, still alive across the window). Pass `strike_pct_otm` (e.g. 0.05) to fix a
+    %-OTM strike instead (§7.3, §7.6).
     """
     S = market.index_price
-    if strike_pct_otm is not None:
-        strike = round(S * (1.0 - strike_pct_otm))
-    else:
-        strike = round(S - snapshot.expected_move_30d)  # ~1 expected move down
-
     T = expiry_days / 365.0
     sigma = market.index_iv
     r = market.risk_free_rate
+
+    if strike_pct_otm is not None:
+        strike = round(S * (1.0 - strike_pct_otm))
+    else:
+        strike = round(bs.strike_for_put_delta(S, target_put_delta, T, r, sigma))
 
     p_delta = bs.put_delta(S, strike, T, r, sigma)
     premium_share = bs.put_price(S, strike, T, r, sigma)
@@ -158,13 +161,18 @@ def plan_strategy(
     market: MarketData,
     snapshot: RiskSnapshot,
     current_contracts: int = 0,
-    expiry_days: int = 30,
+    income_dte: int = 7,
+    hedge_dte: int = 14,
 ) -> StrategyPlan:
-    """Combine the income overlay and the hedge overlay into one decision (§3, §7)."""
-    income = plan_income(portfolio, market, snapshot, expiry_days=expiry_days)
+    """Combine the income overlay and the hedge overlay into one decision (§3, §7).
+
+    Income sells weekly (`income_dte`) to harvest fast time decay; the hedge uses a
+    longer-dated put (`hedge_dte`) so protection stays alive across the window.
+    """
+    income = plan_income(portfolio, market, snapshot, expiry_days=income_dte)
     hedge = plan_hedge(
         portfolio, market, snapshot,
-        current_contracts=current_contracts, expiry_days=expiry_days,
+        current_contracts=current_contracts, expiry_days=hedge_dte,
     )
     hedge_theta_total = hedge.theta_per_day * hedge.contracts_target  # negative (cost)
     net_theta = income.net_theta_per_day + hedge_theta_total

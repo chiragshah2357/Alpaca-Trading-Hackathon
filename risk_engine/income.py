@@ -1,15 +1,18 @@
-"""The income overlay — the P&L engine (README §3 profit engine, §7.7-7.9).
+"""The income overlay — short-dated theta harvesting (README §3 profit engine, §7.7-7.9).
 
-Turns rich implied volatility into *collected premium* via three defined-risk legs:
+Tuned for a short (~1 week) trading window: the P&L comes from *time decay*, which is
+fastest in the last days of an option's life. So the overlay sells **weekly (~7 DTE)**,
+**defined-risk** premium and lets the clock pay us:
 
-  * covered calls        — sell calls against stock we own (income + a cushion)
-  * cash-secured puts    — sell puts backed by cash (paid to maybe buy lower)
-  * bull put spreads     — sell a put, buy a lower one (capital-light defined risk)
+  * covered calls   — sell weekly calls against stock we own (income + a cushion)
+  * iron condors    — sell an OTM put spread AND an OTM call spread on the index; profit
+                      if it stays in a range while both sides decay. Defined risk both
+                      sides, capital-light — the core theta engine.
 
 How much to deploy scales with `scoring.income_aggressiveness` (rich IV + calm market
--> harvest; risk-off -> stop selling), the mirror image of the hedge dial. Everything
-is priced with Black-Scholes and sized against real capital/position limits, so it runs
-offline and the executor just places what it returns. No broker, no LLM here.
+-> harvest; risk-off -> stop selling). Everything is priced with Black-Scholes and
+sized against real capital/position limits, so it runs offline and the executor just
+places what it returns. No broker, no LLM here.
 
 Pricing note: Alpaca gives per-name IV only as a live snapshot, so offline we price each
 leg with the *index* IV as a proxy (documented approximation, same spirit as §7.1's
@@ -26,40 +29,49 @@ from .metrics import variance_risk_premium
 from .types import MarketData, Portfolio, RiskSnapshot
 
 # --- Tunable knobs (calibrated on the dev account, kept simple for the MVP) ---
-DEFAULT_EXPIRY_DAYS = 30
+DEFAULT_EXPIRY_DAYS = 7       # weeklies — capture the fast end of time decay in-window
 TARGET_CALL_DELTA = 0.30      # sell ~30-delta calls (OTM, ~70% chance kept)
 TARGET_PUT_DELTA = 0.30       # sell ~30-delta puts
-CSP_CASH_FRACTION = 0.50      # use at most half the cash sleeve for cash-secured puts
-RISKON_MAX = 0.30             # regime below this -> allow cash-secured puts; above -> spreads only
-SPREAD_WIDTH_PCT = 0.05       # bull put spread width as a fraction of spot
-MAX_DEFINED_RISK_FRAC = 0.10  # cap total credit-spread max-loss at 10% of equity
+SPREAD_WIDTH_PCT = 0.03       # each spread's width as a fraction of spot (defined risk)
+MAX_DEFINED_RISK_FRAC = 0.10  # cap total credit-spread/condor max-loss at 10% of equity
 
 
 @dataclass(frozen=True)
 class IncomeLeg:
-    """One premium-selling position the agent proposes."""
+    """One premium-selling position the agent proposes.
 
-    kind: str                    # "covered_call" | "cash_secured_put" | "bull_put_spread"
+    Single-leg (covered call) uses `short_strike` only. A spread adds `long_strike`. An
+    iron condor uses `short_strike`/`long_strike` for the PUT side and
+    `call_short_strike`/`call_long_strike` for the CALL side.
+    """
+
+    kind: str                    # "covered_call" | "iron_condor"
     symbol: str
     short_strike: float
-    long_strike: float | None    # None for single-leg (covered call / cash-secured put)
+    long_strike: float | None    # None for a single-leg covered call
     expiry_days: int
     short_delta: float
     contracts: int
     credit: float                # $ premium collected (positive)
     max_loss: float              # $ defined risk this leg adds (0 for a covered call)
-    capital_reserved: float      # $ tied up (cash for CSP, spread width for the spread)
+    capital_reserved: float      # $ tied up (margin ~ defined risk)
     theta_per_day: float         # $ income/day from decay (positive — we are short)
     note: str = ""
+    call_short_strike: float | None = None  # iron condor call side
+    call_long_strike: float | None = None
 
     def as_lines(self) -> list[str]:
-        strikes = (
-            f"${self.short_strike:.0f}"
-            if self.long_strike is None
-            else f"sell ${self.short_strike:.0f} / buy ${self.long_strike:.0f}"
-        )
+        if self.kind == "iron_condor":
+            desc = (
+                f"put {self.long_strike:.0f}/{self.short_strike:.0f}  "
+                f"call {self.call_short_strike:.0f}/{self.call_long_strike:.0f}"
+            )
+        elif self.long_strike is None:
+            desc = f"${self.short_strike:.0f}"
+        else:
+            desc = f"sell ${self.short_strike:.0f} / buy ${self.long_strike:.0f}"
         return [
-            f"{self.kind:16s} {self.symbol}  x{self.contracts}  ({self.expiry_days}d, {strikes}, delta {self.short_delta:+.2f})",
+            f"{self.kind:16s} {self.symbol}  x{self.contracts}  ({self.expiry_days}d, {desc})",
             f"    credit ${self.credit:,.0f}   max_loss ${self.max_loss:,.0f}   "
             f"reserved ${self.capital_reserved:,.0f}   theta +${self.theta_per_day:,.0f}/day",
         ]
@@ -83,7 +95,7 @@ class IncomePlan:
             f"total_credit      = ${self.total_credit:,.0f}",
             f"net_theta/day     = +${self.net_theta_per_day:,.0f}",
             f"capital_reserved  = ${self.capital_reserved:,.0f}   defined_risk ${self.total_max_loss:,.0f}",
-            f"annualized_yield  = {self.annualized_yield*100:.1f}%  (credit vs equity)",
+            f"annualized_yield  = {self.annualized_yield*100:.0f}%  (credit vs equity, run-rate)",
         ]
         for leg in self.legs:
             head.extend(leg.as_lines())
@@ -111,7 +123,7 @@ def plan_income(
     target_call_delta: float = TARGET_CALL_DELTA,
     target_put_delta: float = TARGET_PUT_DELTA,
 ) -> IncomePlan:
-    """Build the premium-selling overlay sized to the current IV/regime posture.
+    """Build the weekly premium-selling overlay sized to the current IV/regime posture.
 
     Returns an empty plan when premium isn't worth selling (cheap IV or risk-off).
     """
@@ -158,74 +170,66 @@ def plan_income(
             )
         )
 
-    # --- Short-put income: cash-secured put if calm & affordable, else a spread -
-    Kp = round(bs.strike_for_put_delta(S, target_put_delta, T, r, iv))
-    put_prem = bs.put_price(S, Kp, T, r, iv)
-    csp_notional = Kp * 100.0
-    cash_budget = portfolio.cash * CSP_CASH_FRACTION
+    # --- Iron condor on the index: sell a put spread + a call spread ----------
+    # Defined risk on both sides; profits if the index stays between the short strikes
+    # while every leg decays. The capital-light core of the weekly theta engine.
+    width = max(1.0, round(S * SPREAD_WIDTH_PCT))
 
-    if snapshot.regime_signal < RISKON_MAX and cash_budget >= csp_notional and put_prem > 0.0:
-        max_n = int(floor(cash_budget / csp_notional))
-        n = max(1, int(round(agg * max_n))) if max_n > 0 else 0
-        n = min(n, max_n)
+    put_short = round(bs.strike_for_put_delta(S, target_put_delta, T, r, iv))
+    put_long = put_short - width
+    call_short = round(bs.strike_for_call_delta(S, target_call_delta, T, r, iv))
+    call_long = call_short + width
+
+    put_s_prem = bs.put_price(S, put_short, T, r, iv)
+    put_l_prem = bs.put_price(S, put_long, T, r, iv)
+    call_s_prem = bs.call_price(S, call_short, T, r, iv)
+    call_l_prem = bs.call_price(S, call_long, T, r, iv)
+
+    put_credit_share = put_s_prem - put_l_prem
+    call_credit_share = call_s_prem - call_l_prem
+    total_credit_share = put_credit_share + call_credit_share
+
+    # One side of a condor can be breached at expiry, not both -> max loss uses one width.
+    condor_risk_share = width - total_credit_share
+    if total_credit_share > 0.0 and condor_risk_share > 0.0:
+        per_contract_risk = condor_risk_share * 100.0
+        budget = equity * MAX_DEFINED_RISK_FRAC
+        max_n = int(floor(budget / per_contract_risk)) if per_contract_risk > 0 else 0
+        n = min(max_n, max(1, int(round(agg * max_n)))) if max_n > 0 else 0
         if n > 0:
-            pay = payoffs.cash_secured_put_payoff(Kp, put_prem)
-            theta = -bs.put_theta_per_day(S, Kp, T, r, iv) * 100.0 * n
+            put_theta = (
+                -bs.put_theta_per_day(S, put_short, T, r, iv)
+                + bs.put_theta_per_day(S, put_long, T, r, iv)
+            )
+            call_theta = (
+                -bs.call_theta_per_day(S, call_short, T, r, iv)
+                + bs.call_theta_per_day(S, call_long, T, r, iv)
+            )
+            theta = (put_theta + call_theta) * 100.0 * n
             legs.append(
                 IncomeLeg(
-                    kind="cash_secured_put",
+                    kind="iron_condor",
                     symbol=market.index_symbol,
-                    short_strike=float(Kp),
-                    long_strike=None,
+                    short_strike=float(put_short),
+                    long_strike=float(put_long),
                     expiry_days=expiry_days,
-                    short_delta=bs.put_delta(S, Kp, T, r, iv),
+                    short_delta=bs.put_delta(S, put_short, T, r, iv),
                     contracts=n,
-                    credit=pay.credit * n,
-                    max_loss=pay.max_loss * n,
-                    capital_reserved=pay.capital_reserved * n,
+                    credit=total_credit_share * 100.0 * n,
+                    max_loss=per_contract_risk * n,
+                    capital_reserved=per_contract_risk * n,  # margin ~ one side's risk
                     theta_per_day=theta,
-                    note=f"willing to buy {market.index_symbol} at ${Kp:.0f}",
+                    note="profit if range-bound; defined risk both sides",
+                    call_short_strike=float(call_short),
+                    call_long_strike=float(call_long),
                 )
             )
-    else:
-        # Defined-risk bull put spread: capital-light, safe to run in any regime.
-        width = max(1.0, round(S * SPREAD_WIDTH_PCT))
-        Kl = Kp - width
-        long_prem = bs.put_price(S, Kl, T, r, iv)
-        credit_share = put_prem - long_prem
-        if credit_share > 0.0:
-            pay = payoffs.bull_put_spread_payoff(Kp, Kl, put_prem, long_prem)
-            if pay.max_loss > 0.0:
-                budget = equity * MAX_DEFINED_RISK_FRAC
-                max_n = int(floor(budget / pay.max_loss))
-                n = min(max_n, max(1, int(round(agg * max_n)))) if max_n > 0 else 0
-                if n > 0:
-                    theta = (
-                        -bs.put_theta_per_day(S, Kp, T, r, iv)
-                        + bs.put_theta_per_day(S, Kl, T, r, iv)
-                    ) * 100.0 * n
-                    legs.append(
-                        IncomeLeg(
-                            kind="bull_put_spread",
-                            symbol=market.index_symbol,
-                            short_strike=float(Kp),
-                            long_strike=float(Kl),
-                            expiry_days=expiry_days,
-                            short_delta=bs.put_delta(S, Kp, T, r, iv),
-                            contracts=n,
-                            credit=pay.net_credit * n,
-                            max_loss=pay.max_loss * n,
-                            capital_reserved=pay.max_loss * n,  # margin ≈ defined risk
-                            theta_per_day=theta,
-                            note="defined-risk credit spread",
-                        )
-                    )
 
     total_credit = sum(leg.credit for leg in legs)
     total_max_loss = sum(leg.max_loss for leg in legs)
     capital_reserved = sum(leg.capital_reserved for leg in legs)
     net_theta = sum(leg.theta_per_day for leg in legs)
-    # Annualize the collected credit as a rough yield headline.
+    # Annualize the collected credit as a rough run-rate yield headline.
     ann_yield = (total_credit / equity) * (365.0 / expiry_days) if equity else 0.0
 
     return IncomePlan(
