@@ -1,30 +1,58 @@
-"""The EXECUTE step — place the approved orders on Alpaca (README §6).
+"""The EXECUTE step — place the approved orders (README §6).
 
-`default_executor` is a STUB: it does a DRY RUN, returning the exact orders it *would*
-place, so you can see the loop's output before wiring real trades. Swap it for a live
-executor that submits via Alpaca (the `alpacahq/alpaca-skills` through MCP/CLI, or
-alpaca-py directly), enforcing idempotency + the liquidity gate (`metrics.is_liquid`).
-Return the same shape so LOG/tests keep working.
+The decision -> order translation lives in `orders.py`; here we just submit each
+`OrderIntent` through a `Broker`. Options:
+
+  * `default_executor`  — DRY RUN: lists the exact orders (with legs) it would place.
+  * `BrokerExecutor(broker)` — submits each intent through any `Broker`
+    (`DryRunBroker`, a test fake, or `McpBroker` from mcp_executor.py for live Alpaca).
+
+Swap the stub for `BrokerExecutor(McpBroker(...))` when you're ready to trade — nothing
+upstream changes.
 """
 from __future__ import annotations
 
+from .orders import Broker, OrderIntent, plan_to_orders
+
 
 def default_executor(decision: dict, context: dict) -> dict:
-    """Dry-run: translate the decision into the orders it would submit."""
-    orders: list[dict] = []
-    for leg in decision.get("income_legs", []):
-        orders.append({
-            "structure": leg["kind"],
-            "symbol": leg["symbol"],
-            "contracts": leg["contracts"],
-            "side": "sell_to_open",   # income legs are net-credit (we sell premium)
-        })
-    hedge = decision.get("hedge", {})
-    if hedge.get("action") != "hold" and hedge.get("contracts_delta"):
-        orders.append({
-            "structure": "protective_put",
-            "symbol": context.get("index_symbol", "SPY"),
-            "contracts": abs(hedge["contracts_delta"]),
-            "side": "buy_to_open" if hedge["contracts_delta"] > 0 else "sell_to_close",
-        })
-    return {"dry_run": True, "orders": orders, "note": "no live executor wired — dry-run only"}
+    """Dry-run: translate the decision into the concrete orders it would submit."""
+    intents = plan_to_orders(
+        decision.get("income_legs", []),
+        decision.get("hedge", {}),
+        context.get("index_symbol", "SPY"),
+    )
+    return {
+        "dry_run": True,
+        "orders": [i.to_dict() for i in intents],
+        "note": "no live broker wired - dry-run only",
+    }
+
+
+class DryRunBroker:
+    """A Broker that places nothing and just echoes the intent (safe default)."""
+
+    dry_run = True
+
+    def submit(self, intent: OrderIntent) -> dict:
+        return {"status": "dry_run", "order": intent.to_dict()}
+
+
+class BrokerExecutor:
+    """An executor that submits each order intent through a `Broker`."""
+
+    def __init__(self, broker: Broker):
+        self.broker = broker
+
+    def __call__(self, decision: dict, context: dict) -> dict:
+        intents = plan_to_orders(
+            decision.get("income_legs", []),
+            decision.get("hedge", {}),
+            context.get("index_symbol", "SPY"),
+        )
+        results = [self.broker.submit(i) for i in intents]
+        return {
+            "dry_run": getattr(self.broker, "dry_run", False),
+            "orders": [i.to_dict() for i in intents],
+            "results": results,
+        }

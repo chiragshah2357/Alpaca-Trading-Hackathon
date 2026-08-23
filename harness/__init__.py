@@ -12,8 +12,9 @@ real LLM + Alpaca order placement — the node contracts stay the same.
 """
 from __future__ import annotations
 
-from .executor import default_executor
+from .executor import BrokerExecutor, DryRunBroker, default_executor
 from .llm import default_decider
+from .orders import OptionLeg, OrderIntent, plan_to_orders
 from .run import run_cycle
 from .state import GraphState
 
@@ -22,14 +23,25 @@ __all__ = [
     "GraphState",
     "default_decider",
     "default_executor",
+    "BrokerExecutor",
+    "DryRunBroker",
+    "OrderIntent",
+    "OptionLeg",
+    "plan_to_orders",
     "build_graph",
+    "make_mcp_executor",
 ]
 
 
 def __getattr__(name: str):
-    # Lazy — importing `harness` never imports langgraph; only build_graph touches it.
+    # Lazy — importing `harness` never imports langgraph or langchain-mcp-adapters;
+    # only touching these attributes does.
     if name == "build_graph":
         from .graph import build_graph
 
         return build_graph
+    if name == "make_mcp_executor":
+        from .mcp_executor import make_mcp_executor
+
+        return make_mcp_executor
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

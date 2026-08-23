@@ -10,8 +10,9 @@ import unittest
 from pathlib import Path
 
 from feed import MockDataSource, StateStore
-from harness import default_decider, run_cycle
+from harness import BrokerExecutor, default_decider, plan_to_orders, run_cycle
 from harness import nodes
+from harness.orders import OrderIntent
 
 
 class TestHarness(unittest.TestCase):
@@ -49,6 +50,63 @@ class TestHarness(unittest.TestCase):
         self.assertFalse(state["context"]["plan"]["income"]["legs"])
         self.assertFalse(state["context"]["validation"]["ok"])
         self.assertIn("log", state)
+
+
+class TestOrders(unittest.TestCase):
+    def test_iron_condor_to_four_legs(self):
+        leg = {
+            "kind": "iron_condor", "symbol": "SPY", "contracts": 8, "expiry_days": 7,
+            "short_strike": 523.0, "long_strike": 507.0,
+            "call_short_strike": 540.0, "call_long_strike": 556.0, "note": "",
+        }
+        [intent] = plan_to_orders([leg], {"action": "hold"})
+        self.assertEqual(intent.structure, "iron_condor")
+        self.assertEqual(intent.net_side, "credit")
+        self.assertEqual(len(intent.legs), 4)
+        # sell the inner strikes, buy the protective wings
+        kinds = {(l.right, l.action) for l in intent.legs}
+        self.assertIn(("P", "sell"), kinds)
+        self.assertIn(("P", "buy"), kinds)
+        self.assertIn(("C", "sell"), kinds)
+        self.assertIn(("C", "buy"), kinds)
+
+    def test_covered_call_and_hedge(self):
+        cc = {"kind": "covered_call", "symbol": "SPY", "contracts": 1, "expiry_days": 7,
+              "short_strike": 566.0, "long_strike": None, "note": ""}
+        hedge = {"action": "increase", "contracts_delta": 5, "put_strike": 510.0,
+                 "put_expiry_days": 14}
+        intents = plan_to_orders([cc], hedge, index_symbol="SPY")
+        cc_i = next(i for i in intents if i.structure == "covered_call")
+        self.assertEqual(cc_i.legs[0].right, "C")
+        self.assertEqual(cc_i.legs[0].action, "sell")
+        put_i = next(i for i in intents if i.structure == "protective_put")
+        self.assertEqual(put_i.net_side, "debit")
+        self.assertEqual(put_i.legs[0].action, "buy")   # +delta -> buy protection
+        self.assertEqual(put_i.contracts, 5)
+
+    def test_broker_executor_submits_each_intent(self):
+        class FakeBroker:
+            dry_run = False
+            def __init__(self): self.seen = []
+            def submit(self, intent: OrderIntent) -> dict:
+                self.seen.append(intent.structure)
+                return {"status": "ok", "structure": intent.structure}
+
+        decision = default_decider({
+            "plan": {
+                "posture": "HARVEST",
+                "income": {"legs": [
+                    {"kind": "covered_call", "symbol": "SPY", "contracts": 1,
+                     "expiry_days": 7, "short_strike": 566.0, "long_strike": None, "note": ""},
+                ]},
+                "hedge": {"action": "hold", "contracts_delta": 0},
+            }
+        })
+        broker = FakeBroker()
+        out = BrokerExecutor(broker)(decision, {"index_symbol": "SPY"})
+        self.assertEqual(broker.seen, ["covered_call"])
+        self.assertFalse(out["dry_run"])
+        self.assertEqual(len(out["results"]), 1)
 
 
 if __name__ == "__main__":

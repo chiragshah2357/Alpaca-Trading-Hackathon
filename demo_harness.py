@@ -26,7 +26,9 @@ def main() -> int:
     print(f"  reasoning = {state['decision']['reasoning']}")
     print("EXECUTION (dry run - orders it would place)")
     for o in state.get("execution", {}).get("orders", []):
-        print(f"  {o['side']:14s} {o['contracts']:>3} x {o['structure']} on {o['symbol']}")
+        legs = ", ".join(f"{l['action']} {l['right']}{l['strike']:.0f}" for l in o["legs"])
+        print(f"  {o['structure']:14s} {o['symbol']} x{o['contracts']} "
+              f"({o['net_side']}, {o['expiry_days']}d): {legs}")
     print("LOG")
     print(f"  {state['log']}")
 
