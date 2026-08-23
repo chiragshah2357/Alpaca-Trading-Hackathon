@@ -29,8 +29,18 @@ The first slice is deliberately local and keyless:
 4. Reject stale contexts, invented candidates, missing reasons, and limit breaches.
 5. Write approved results as idempotent `paper_dry_run` JSONL records.
 
+If the risk-engine target would breach the hard hedge-cost budget, candidate generation
+reduces it to the largest deterministically sized hedge inside the cap before exposing it
+to the model. Rejected or unaffordable actions are not presented as admissible choices.
+
 No Alpaca credentials, HF token, Modal secret, remote model, or real order is needed
 for this slice.
+
+The next read-only seam uses `alpaca-mcp-server==2.2.1` behind one narrow DSH tool.
+Only account/positions, SPY bars/latest trade, and an indicative SPY put chain are
+allowlisted. Alpaca order, close-position, cancellation, exercise, and account-config
+tools are not registered with the model. Credentials remain in the DSH process and its
+MCP child environment only; the connection is hard-wired to paper mode.
 
 ## Contracts
 

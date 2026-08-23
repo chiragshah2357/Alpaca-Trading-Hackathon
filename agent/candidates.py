@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from hashlib import sha256
 import json
+from math import floor
 
 from risk_engine import IncomePlan, MarketData, Portfolio, StrategyPlan, assess, plan_hedge, plan_income
 from risk_engine.payoffs import stress_pnl
 
 from .contracts import CandidateTradeoffs, DecisionCandidate, DecisionContext
+from .limits import MAX_HEDGE_COST_DRAG
 
 
 def _empty_income() -> IncomePlan:
@@ -172,16 +174,40 @@ def build_decision_context(
             current_contracts=current_contracts,
             expiry_days=expiry_days,
         )
+        candidate_id = "full_hedge"
+        label = "Defend at the risk-engine target"
+        thesis = "Prioritize drawdown control under elevated deterministic risk."
+        if full_hedge.hedge_cost_drag > MAX_HEDGE_COST_DRAG:
+            max_contracts = floor(
+                portfolio.equity * MAX_HEDGE_COST_DRAG / full_hedge.premium_per_contract
+            )
+            capped_coverage = min(
+                full_coverage,
+                max_contracts / full_hedge.full_hedge_contracts
+                if full_hedge.full_hedge_contracts else 0.0,
+            )
+            capped_snapshot = replace(snapshot, target_coverage=capped_coverage)
+            full_hedge = plan_hedge(
+                portfolio,
+                market,
+                capped_snapshot,
+                current_contracts=current_contracts,
+                expiry_days=expiry_days,
+            )
+            candidate_id = "cost_capped_hedge"
+            label = "Defend up to the hedge-cost cap"
+            thesis = "Maximize protection without breaching the deterministic premium budget."
         full_plan = _strategy("DEFEND", _empty_income(), full_hedge)
-        candidates.append(_candidate(
-            "full_hedge",
-            "add_hedge",
-            "Defend at the risk-engine target",
-            "Prioritize drawdown control under elevated deterministic risk.",
-            full_plan,
-            snapshot,
-            market,
-        ))
+        if full_hedge.contracts_target > partial_hedge.contracts_target:
+            candidates.append(_candidate(
+                candidate_id,
+                "add_hedge",
+                label,
+                thesis,
+                full_plan,
+                snapshot,
+                market,
+            ))
 
     if not candidates:  # Defensive fallback for unusual future scoring changes.
         raise RuntimeError("candidate generation produced no admissible action")

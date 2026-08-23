@@ -5,10 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 
 from .contracts import AgentDecision, DecisionContext, GateResult
-
-MAX_REASON_LENGTH = 1000
-MAX_DEFINED_RISK_FRACTION = 0.10
-MAX_HEDGE_COST_DRAG = 0.05
+from .limits import MAX_DEFINED_RISK_FRACTION, MAX_HEDGE_COST_DRAG, MAX_REASON_LENGTH
 
 
 def _order_id(context_id: str, candidate_id: str, suffix: str) -> str:

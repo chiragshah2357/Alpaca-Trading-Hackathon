@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -25,12 +25,18 @@ run(['plugin', '--profile', 'portfolio-agent', 'add', dshRoot])
 run(['plugin', '--profile', 'portfolio-agent', 'add', '@deepseek-ai/dsh-llm-replay@0.1.1-rc.2'])
 
 const selections = {
-  calm: ['9f42433a04744c01be32', 'hold'],
-  elevated: ['56ecc1244bca7ad0cbcd', 'harvest_income'],
-  stressed: ['12e07340dacfcdf9a88d', 'full_hedge'],
+  calm: 'hold',
+  elevated: 'harvest_income',
+  stressed: 'cost_capped_hedge',
 }
 
-for (const [scenario, [contextId, candidateId]] of Object.entries(selections)) {
+for (const [scenario, candidateId] of Object.entries(selections)) {
+  const context = JSON.parse(execFileSync(
+    'python3', ['-m', 'agent.cli', 'context', '--scenario', scenario],
+    { cwd: repositoryRoot, encoding: 'utf8' },
+  ))
+  const contextId = context.context_id
+  assert.ok(context.candidates.some(candidate => candidate.candidate_id === candidateId))
   const decisionId = `replay-${scenario}`
   const override = [
     {

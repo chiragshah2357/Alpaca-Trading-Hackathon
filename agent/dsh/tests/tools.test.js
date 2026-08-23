@@ -9,7 +9,7 @@ test('python bridge exposes the expected fixed candidate sets', () => {
   const expected = {
     calm: ['hold'],
     elevated: ['hold', 'harvest_income'],
-    stressed: ['partial_hedge', 'full_hedge'],
+    stressed: ['partial_hedge', 'cost_capped_hedge'],
   }
   for (const [scenario, ids] of Object.entries(expected)) {
     const stdout = execFileSync('python3', ['-m', 'agent.cli', 'context', '--scenario', scenario], {

@@ -24,7 +24,7 @@ class DecisionPipelineTests(unittest.TestCase):
         )
         self.assertEqual(
             [c.candidate_id for c in context("stressed").candidates],
-            ["partial_hedge", "full_hedge"],
+            ["partial_hedge", "cost_capped_hedge"],
         )
 
     def test_model_view_has_tradeoffs_but_not_exact_order_sizes(self):
@@ -46,13 +46,15 @@ class DecisionPipelineTests(unittest.TestCase):
         ctx = context("stressed")
         result = validate_decision(
             ctx,
-            AgentDecision(ctx.context_id, "full_hedge", "Risk is high; prioritize drawdown control."),
+            AgentDecision(ctx.context_id, "cost_capped_hedge", "Risk is high; prioritize drawdown control."),
         )
         self.assertTrue(result.approved)
         self.assertTrue(result.human_approval_required)
         self.assertEqual(len(result.orders), 1)
         self.assertEqual(result.orders[0]["mode"], "paper_dry_run")
         self.assertGreater(result.orders[0]["contracts"], 0)
+        selected = next(c for c in ctx.candidates if c.candidate_id == "cost_capped_hedge")
+        self.assertLessEqual(selected.plan.hedge.hedge_cost_drag, 0.05)
 
     def test_dry_run_ledger_is_idempotent_by_decision_id(self):
         ctx = context("elevated")
