@@ -76,6 +76,25 @@ class IncomeLeg:
             f"reserved ${self.capital_reserved:,.0f}   theta +${self.theta_per_day:,.0f}/day",
         ]
 
+    def to_dict(self) -> dict:
+        """JSON-serializable view of one premium leg (an order for the executor)."""
+        return {
+            "kind": self.kind,
+            "symbol": self.symbol,
+            "short_strike": self.short_strike,
+            "long_strike": self.long_strike,
+            "call_short_strike": self.call_short_strike,
+            "call_long_strike": self.call_long_strike,
+            "expiry_days": self.expiry_days,
+            "short_delta": round(self.short_delta, 3),
+            "contracts": self.contracts,
+            "credit": round(self.credit, 2),
+            "max_loss": round(self.max_loss, 2),
+            "capital_reserved": round(self.capital_reserved, 2),
+            "theta_per_day": round(self.theta_per_day, 2),
+            "note": self.note,
+        }
+
 
 @dataclass(frozen=True)
 class IncomePlan:
@@ -100,6 +119,18 @@ class IncomePlan:
         for leg in self.legs:
             head.extend(leg.as_lines())
         return head
+
+    def to_dict(self) -> dict:
+        """JSON-serializable view of the whole income overlay."""
+        return {
+            "legs": [leg.to_dict() for leg in self.legs],
+            "total_credit": round(self.total_credit, 2),
+            "total_max_loss": round(self.total_max_loss, 2),
+            "capital_reserved": round(self.capital_reserved, 2),
+            "net_theta_per_day": round(self.net_theta_per_day, 2),
+            "aggressiveness": round(self.aggressiveness, 3),
+            "annualized_yield": round(self.annualized_yield, 4),
+        }
 
 
 def _empty_plan(aggressiveness: float = 0.0) -> IncomePlan:

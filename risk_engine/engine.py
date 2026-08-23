@@ -142,6 +142,16 @@ class StrategyPlan:
             f"(credit ${self.income.total_credit:,.0f} - hedge ${self.hedge.total_cost:,.0f})",
         ]
 
+    def to_dict(self) -> dict:
+        """JSON-serializable view of the whole per-cycle decision (the DECIDE input)."""
+        return {
+            "posture": self.posture,
+            "net_theta_per_day": round(self.net_theta_per_day, 2),
+            "net_cost_today": round(self.net_cost_today, 2),
+            "income": self.income.to_dict(),
+            "hedge": self.hedge.to_dict(),
+        }
+
 
 def _posture(snapshot: RiskSnapshot, income: IncomePlan, hedge: HedgePlan) -> str:
     """One-line stance for the cycle, from which overlay is doing the work."""

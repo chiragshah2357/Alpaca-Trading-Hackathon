@@ -84,6 +84,23 @@ class RiskSnapshot:
             f"target_coverage   = {self.target_coverage*100:.0f}%",
         ]
 
+    def to_dict(self) -> dict:
+        """JSON-serializable view for the agent/harness to read (§4 DECIDE input)."""
+        return {
+            "equity": round(self.equity, 2),
+            "beta_weighted_delta": round(self.beta_weighted_delta, 2),
+            "daily_vol": round(self.daily_vol, 6),
+            "annual_vol": round(self.annual_vol, 4),
+            "drawdown": round(self.drawdown, 4),
+            "regime_signal": round(self.regime_signal, 3),
+            "var_95": round(self.var_95, 2),
+            "var_99": round(self.var_99, 2),
+            "iv_rank": round(self.iv_rank, 1),
+            "expected_move_30d": round(self.expected_move_30d, 2),
+            "risk_score": round(self.risk_score, 1),
+            "target_coverage": round(self.target_coverage, 3),
+        }
+
 
 @dataclass(frozen=True)
 class HedgePlan:
@@ -114,3 +131,21 @@ class HedgePlan:
             f"total_cost        = ${self.total_cost:,.0f}   (drag {self.hedge_cost_drag*100:.2f}% of equity)",
             f"theta/contract    = ${self.theta_per_day:,.0f}/day",
         ]
+
+    def to_dict(self) -> dict:
+        """JSON-serializable view of the hedge order (§7.3)."""
+        return {
+            "action": self.action,
+            "target_coverage": round(self.target_coverage, 3),
+            "current_coverage": round(self.current_coverage, 3),
+            "put_strike": round(self.put_strike, 2),
+            "put_expiry_days": self.put_expiry_days,
+            "put_delta": round(self.put_delta, 3),
+            "contracts_target": self.contracts_target,
+            "contracts_delta": self.contracts_delta,
+            "premium_per_contract": round(self.premium_per_contract, 2),
+            "total_cost": round(self.total_cost, 2),
+            "hedge_cost_drag": round(self.hedge_cost_drag, 4),
+            "theta_per_day": round(self.theta_per_day, 2),
+            "full_hedge_contracts": round(self.full_hedge_contracts, 2),
+        }

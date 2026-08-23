@@ -12,6 +12,7 @@ from __future__ import annotations
 from .types import HedgePlan, MarketData, Portfolio, Position, RiskSnapshot
 from .income import IncomeLeg, IncomePlan, plan_income
 from .engine import StrategyPlan, assess, plan_hedge, plan_strategy
+from .limits import PlanValidation, validate_plan
 from .book import (
     DEFAULT_BOOK,
     BookEntry,
@@ -52,6 +53,8 @@ __all__ = [
     "plan_income",
     "StrategyPlan",
     "plan_strategy",
+    "validate_plan",
+    "PlanValidation",
     # payoffs (§7.5, §7.8, §7.9)
     "ProtectivePutPayoff",
     "CollarPayoff",
