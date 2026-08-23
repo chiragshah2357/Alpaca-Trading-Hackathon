@@ -13,7 +13,7 @@ real LLM + Alpaca order placement — the node contracts stay the same.
 from __future__ import annotations
 
 from .executor import BrokerExecutor, DryRunBroker, default_executor
-from .llm import default_decider
+from .llm import default_decider, make_llm_decider
 from .orders import OptionLeg, OrderIntent, plan_to_orders
 from .run import run_cycle
 from .state import GraphState
@@ -22,6 +22,7 @@ __all__ = [
     "run_cycle",
     "GraphState",
     "default_decider",
+    "make_llm_decider",
     "default_executor",
     "BrokerExecutor",
     "DryRunBroker",
