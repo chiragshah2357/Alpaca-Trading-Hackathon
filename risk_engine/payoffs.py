@@ -133,6 +133,116 @@ def put_spread_payoff(
     )
 
 
+# ---------------------------------------------------------------------------
+# Income structures — premium we *sell* to generate P&L (README §3, §7.7).
+# Credits are positive $ collected; "max_loss" is the position's defined risk.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CoveredCallPayoff:
+    """Own the stock + sell a call — income + a small cushion, capped upside (§3)."""
+
+    credit: float          # $ premium collected
+    capped_gain: float     # $ max gain if called away (appreciation to strike + credit)
+    downside_cushion: float  # $ the credit softens a drop by this much
+    call_strike: float
+
+    def as_lines(self) -> list[str]:
+        return [
+            f"credit            = ${self.credit:,.0f}",
+            f"capped_gain       = ${self.capped_gain:,.0f}  (called away at ${self.call_strike:.0f})",
+            f"downside_cushion  = ${self.downside_cushion:,.0f}",
+        ]
+
+
+@dataclass(frozen=True)
+class CashSecuredPutPayoff:
+    """Sell a put, set aside cash — get paid to (maybe) buy the stock lower (§7.7)."""
+
+    credit: float           # $ premium collected
+    capital_reserved: float  # $ cash set aside (strike * 100 * contracts)
+    max_loss: float         # $ worst case (stock -> 0), net of the credit
+    breakeven: float        # effective purchase price if assigned
+    put_strike: float
+
+    def as_lines(self) -> list[str]:
+        return [
+            f"credit            = ${self.credit:,.0f}",
+            f"capital_reserved  = ${self.capital_reserved:,.0f}",
+            f"max_loss          = ${self.max_loss:,.0f}  (if assigned, to $0)",
+            f"breakeven         = ${self.breakeven:,.2f}",
+        ]
+
+
+@dataclass(frozen=True)
+class CreditSpreadPayoff:
+    """Sell a put, buy a further-OTM put — defined-risk income (§7.9, credit side)."""
+
+    net_credit: float      # $ collected (= max gain)
+    max_loss: float        # $ defined worst case (width - credit)
+    breakeven: float       # underlying level where the spread nets to zero
+    short_strike: float
+    long_strike: float
+
+    def as_lines(self) -> list[str]:
+        return [
+            f"net_credit        = ${self.net_credit:,.0f}  (= max gain)",
+            f"max_loss          = ${self.max_loss:,.0f}  (defined)",
+            f"breakeven         = ${self.breakeven:,.2f}",
+            f"strikes           = sell ${self.short_strike:.0f} / buy ${self.long_strike:.0f}",
+        ]
+
+
+def covered_call_payoff(
+    stock_price: float, call_strike: float, call_premium: float, shares: int = SHARES
+) -> CoveredCallPayoff:
+    """Credit, capped upside, and downside cushion of selling a call on owned stock."""
+    credit = call_premium * shares
+    return CoveredCallPayoff(
+        credit=credit,
+        capped_gain=(call_strike - stock_price) * shares + credit,
+        downside_cushion=credit,
+        call_strike=call_strike,
+    )
+
+
+def cash_secured_put_payoff(
+    put_strike: float, put_premium: float, shares: int = SHARES
+) -> CashSecuredPutPayoff:
+    """Credit, cash reserved, and worst case of a cash-secured short put."""
+    credit = put_premium * shares
+    return CashSecuredPutPayoff(
+        credit=credit,
+        capital_reserved=put_strike * shares,
+        max_loss=put_strike * shares - credit,
+        breakeven=put_strike - put_premium,
+        put_strike=put_strike,
+    )
+
+
+def bull_put_spread_payoff(
+    short_strike: float,
+    long_strike: float,
+    short_premium: float,
+    long_premium: float,
+    shares: int = SHARES,
+) -> CreditSpreadPayoff:
+    """Net credit and defined max loss of a bull put (credit) spread (§7.9).
+
+    Sell the higher `short_strike` put, buy the lower `long_strike` put for protection.
+    """
+    net_credit = (short_premium - long_premium) * shares
+    width = (short_strike - long_strike) * shares
+    return CreditSpreadPayoff(
+        net_credit=net_credit,
+        max_loss=width - net_credit,
+        breakeven=short_strike - net_credit / shares,
+        short_strike=short_strike,
+        long_strike=long_strike,
+    )
+
+
 def stress_pnl(
     beta_weighted_delta: float,
     shock_pct: float,
