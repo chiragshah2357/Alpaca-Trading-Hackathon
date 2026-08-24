@@ -115,19 +115,26 @@ def _decision_from(plan: dict, action: str, factor: float, reasoning: str) -> di
     }
 
 
-def make_llm_decider(completion_fn=None, *, role: str = "THESIS", fallback: str = "approve"):
+def make_llm_decider(
+    completion_fn=None, *, role: str = "THESIS", fallback: str = "approve", skills: str = ""
+):
     """Build a decider backed by an LLM.
 
     `completion_fn(system, user) -> str` lets you inject any model (or a fake in tests);
-    when omitted it uses `agent.llm.complete` with the `role`'s configured provider. On
-    any error it falls back to `fallback` (default: approve the validated plan).
+    when omitted it uses `agent.llm.complete` with the `role`'s configured provider.
+    `skills` is Alpaca SKILL.md reference text (see skills.py) injected into the prompt so
+    the model has domain know-how. On any error it falls back to `fallback` (approve).
     """
+    system = _SYSTEM
+    if skills:
+        system += "\n\nREFERENCE — Alpaca skills (domain know-how you may use):\n" + skills
+
     def decider(context: dict) -> dict:
         plan = context["plan"]
         try:
             fn = completion_fn or _real_completion(role)
             user = "This cycle's context:\n" + json.dumps(_prompt_context(context)) + "\nDecide."
-            parsed = _parse_decision(fn(_SYSTEM, user))
+            parsed = _parse_decision(fn(system, user))
         except Exception as e:  # model/key/parse failure -> keep the loop alive, safely
             return _decision_from(
                 plan, fallback, 1.0,
