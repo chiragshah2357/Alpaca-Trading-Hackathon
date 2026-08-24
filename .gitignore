@@ -25,6 +25,10 @@ node_modules/
 .dsh/
 agent/dsh/tests/replay/.generated.override.json
 
+# Runtime agent state — created locally, force-committed only by the cron workflow
+state/*.json
+state/*.jsonl
+
 # OS / editor
 .DS_Store
 Thumbs.db

@@ -12,6 +12,7 @@ integration smoke tests; this is the unit net that freezes the foundation.
 """
 from __future__ import annotations
 
+import json
 import math
 import tempfile
 import unittest
@@ -24,10 +25,12 @@ from risk_engine import (
     assess,
     plan_hedge,
     plan_strategy,
+    validate_plan,
 )
 from risk_engine import blackscholes as bs
 from risk_engine import metrics, payoffs, scoring
 from feed import MockDataSource, StateStore, compute_beta, moving_average, observe
+from strategy_api import get_strategy_context
 
 
 # --- shared fixtures --------------------------------------------------------
@@ -296,6 +299,53 @@ class TestFeed(unittest.TestCase):
         r1 = state.iv_range()
         self.assertFalse(r1.seeded)  # enough samples -> observed range
         self.assertLess(r1.low, r1.high)
+
+
+class TestContract(unittest.TestCase):
+    """The JSON contract + risk-cap bouncer the harness relies on."""
+
+    def _elev_plan(self):
+        b = _book(555, 475, 301_500, cash=40_000)
+        return b, plan_strategy(b, ELEVATED, assess(b, ELEVATED))
+
+    def test_to_dict_is_json_serializable(self):
+        b, plan = self._elev_plan()
+        snap = assess(b, ELEVATED)
+        for obj in (snap.to_dict(), plan.to_dict(), plan.income.to_dict(), plan.hedge.to_dict()):
+            json.dumps(obj)  # raises if any value isn't JSON-serializable
+        d = plan.to_dict()
+        self.assertIn("posture", d)
+        self.assertIn("legs", d["income"])
+
+    def test_validate_daily_halt(self):
+        b, plan = self._elev_plan()
+        v = validate_plan(plan, b.equity, day_pnl_pct=-0.06)  # -6% day
+        self.assertFalse(v.ok)
+        self.assertFalse(v.plan.income.legs)  # new premium halted
+        self.assertTrue(any("halt" in x.lower() for x in v.violations))
+
+    def test_validate_clamps_oversized_risk(self):
+        _, plan = self._elev_plan()
+        tiny_equity = 30_000.0  # forces per-underlying + total caps to bite
+        v = validate_plan(plan, tiny_equity, day_pnl_pct=0.0)
+        self.assertFalse(v.ok)
+        # after clamping, total option risk must fit under the total cap
+        total_risk = sum(l.max_loss for l in v.plan.income.legs) + v.plan.hedge.total_cost
+        self.assertLessEqual(total_risk, 0.30 * tiny_equity + 1.0)
+
+    def test_validate_passes_clean_when_within_caps(self):
+        b, plan = self._elev_plan()
+        v = validate_plan(plan, b.equity, day_pnl_pct=0.0)
+        self.assertTrue(v.ok, msg=f"unexpected violations: {v.violations}")
+
+    def test_get_strategy_context_roundtrip(self):
+        tmp = Path(tempfile.mkdtemp(prefix="ctxtest_")) / "s.json"
+        ctx = get_strategy_context(MockDataSource(), StateStore(tmp))
+        json.dumps(ctx)  # the whole context must be JSON-serializable
+        for key in ("portfolio", "market", "snapshot", "plan", "validation"):
+            self.assertIn(key, ctx)
+        self.assertIn("posture", ctx["plan"])
+        self.assertIsInstance(ctx["validation"]["ok"], bool)
 
 
 if __name__ == "__main__":
