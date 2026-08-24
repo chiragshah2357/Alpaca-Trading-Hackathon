@@ -58,7 +58,11 @@ class DecisionPipelineTests(unittest.TestCase):
 
     def test_dry_run_ledger_is_idempotent_by_decision_id(self):
         ctx = context("elevated")
-        decision = AgentDecision(ctx.context_id, "harvest_income", "IV is rich and regime remains calm.")
+        decision = AgentDecision(
+            ctx.context_id,
+            "harvest_income",
+            "IV is rich and the regime remains calm; keep the rationale UTF-8 safe: café.",
+        )
         result = validate_decision(ctx, decision)
         self.assertTrue(result.approved)
         with tempfile.TemporaryDirectory() as tmp:
@@ -66,7 +70,9 @@ class DecisionPipelineTests(unittest.TestCase):
             first = record_dry_run(path, "decision-1", "elevated", decision, result)
             second = record_dry_run(path, "decision-1", "elevated", decision, result)
             self.assertEqual(first, second)
-            self.assertEqual(len(path.read_text().splitlines()), 1)
+            ledger_text = path.read_text(encoding="utf-8")
+            self.assertEqual(len(ledger_text.splitlines()), 1)
+            self.assertIn("café", ledger_text)
 
             conflicting = AgentDecision(ctx.context_id, "hold", "Different decision.")
             conflicting_result = validate_decision(ctx, conflicting)

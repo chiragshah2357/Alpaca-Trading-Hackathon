@@ -21,7 +21,11 @@ def record_dry_run(
     target = Path(path)
     existing: list[dict[str, Any]] = []
     if target.exists():
-        existing = [json.loads(line) for line in target.read_text().splitlines() if line.strip()]
+        existing = [
+            json.loads(line)
+            for line in target.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
         prior = next((row for row in existing if row["decision_id"] == decision_id), None)
         if prior is not None:
             same_decision = prior["decision"] == {
@@ -45,5 +49,5 @@ def record_dry_run(
     }
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(row, sort_keys=True) + "\n")
+        stream.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
     return row
