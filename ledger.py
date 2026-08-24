@@ -45,6 +45,7 @@ class TradeLedger:
         val = ctx.get("validation") or {}
         ex = state.get("execution") or {}
         dec = state.get("decision") or {}
+        hedge = plan.get("hedge") or {}
         return self.append({
             "ts": ts or datetime.now().isoformat(timespec="seconds"),
             "mode": mode,
@@ -52,15 +53,32 @@ class TradeLedger:
             "approved": dec.get("approved"),
             "risk_score": snap.get("risk_score"),
             "equity": (ctx.get("portfolio") or {}).get("equity"),
+            "index_symbol": ctx.get("index_symbol", "SPY"),
+            "index_price": (ctx.get("market") or {}).get("index_price"),
             "credit": inc.get("total_credit", 0.0),
+            "hedge_cost": hedge.get("total_cost", 0.0),
             "net_theta_per_day": inc.get("net_theta_per_day", 0.0),
-            "hedge_contracts": (plan.get("hedge") or {}).get("contracts_target", 0),
+            "hedge_contracts": hedge.get("contracts_target", 0),
             "orders": ex.get("orders", []),
             "dry_run": ex.get("dry_run", True),
             "validation_ok": val.get("ok", True),
             "violations": val.get("violations", []),
             "log": state.get("log", ""),
         })
+
+    def grade(self, cycle_id: int, grade: dict) -> bool:
+        """Attach a self-grade to an existing cycle (rewrites the small ledger file)."""
+        rows = self.entries(newest_first=False)
+        hit = False
+        for r in rows:
+            if r.get("id") == cycle_id:
+                r["grade"] = grade
+                hit = True
+        if hit:
+            with self.path.open("w", encoding="utf-8") as f:
+                for r in rows:
+                    f.write(json.dumps(r) + "\n")
+        return hit
 
     def entries(self, limit: int | None = None, newest_first: bool = True) -> list[dict]:
         """Read records (newest-first by default; `limit` caps the count)."""
@@ -79,11 +97,17 @@ class TradeLedger:
         for r in rows:
             key = (r.get("posture") or "").split(" ")[0] or "?"
             postures[key] = postures.get(key, 0) + 1
+        graded = [r["grade"] for r in rows if r.get("grade")]
+        realized = sum(g.get("realized_pnl", 0.0) for g in graded)
+        wins = sum(1 for g in graded if g.get("realized_pnl", 0.0) > 0)
         return {
             "cycles": len(rows),
             "total_credit": round(sum(r.get("credit", 0.0) for r in rows), 2),
             "orders_placed": sum(len(r.get("orders", [])) for r in rows),
             "hedged_cycles": sum(1 for r in rows if (r.get("hedge_contracts") or 0) > 0),
             "live_cycles": sum(1 for r in rows if not r.get("dry_run", True)),
+            "graded_cycles": len(graded),
+            "realized_pnl": round(realized, 2),
+            "win_rate": round(wins / len(graded), 3) if graded else None,
             "postures": postures,
         }

@@ -67,6 +67,15 @@ def run_once(source, state, ledger, mode: str, decider=None) -> dict:
     day_pnl = float(os.getenv("DAY_PNL_PCT", "0") or 0.0)
     result = run_cycle(source, state, day_pnl_pct=day_pnl, decider=decider or default_decider)
     ledger.record_cycle(result, mode="LIVE" if mode.startswith("LIVE") else "MOCK")
+
+    # Self-grade any past cycles whose options have now expired (README §8).
+    try:
+        from grade import grade_ledger
+
+        grade_ledger(ledger, price_lookup=source.latest_price)
+    except Exception as e:
+        print(f"grade skipped: {type(e).__name__}: {e}", flush=True)
+
     print(f"[{mode}] {result['log']}", flush=True)
     return result
 

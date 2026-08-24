@@ -196,12 +196,20 @@ function historyCard(h){
   const list = orders.length ? orders.map(o=>`<div class="legrow"><span>·</span><b>${o}</b></div>`).join('')
                              : `<div class="legrow"><span>·</span><b>no trades</b></div>`;
   const live = h.dry_run===false ? '<span class="chip c-credit">live</span>' : '<span class="chip c-debit">dry</span>';
+  let grade='';
+  if(h.grade){
+    const rp=h.grade.realized_pnl||0;
+    grade=`<div class="kv"><span class="k">graded</span>
+      <span class="v ${rp>=0?'pos':'neg'}">${money(rp)}</span></div>
+      <div class="viol" style="color:var(--dim)">✓ ${h.grade.verdict}</div>`;
+  }
   return `<div class="card">
     <div class="top"><span class="chip c-sym">#${h.id} ${t}</span>
       <span class="tag t-${pos}" style="font-size:11px;padding:3px 9px">${pos}</span>
       <span class="spacer"></span>${live}<span class="carry">${(h.orders||[]).length} orders</span></div>
     <div class="body">${list}
       <div class="kv"><span class="k">credit</span><span class="v pos">${money(h.credit||0)}</span></div>
+      ${grade}
     </div></div>`;
 }
 
@@ -221,6 +229,9 @@ async function loadHistory(){
     $('#histsummary').innerHTML = s.cycles
       ? `<b>${s.cycles}</b> cycles · <b class="pos">${money(s.total_credit)}</b> credit collected · `
         +`<b>${s.orders_placed}</b> orders · <b>${s.hedged_cycles}</b> hedged · <b>${s.live_cycles}</b> live`
+        +(s.graded_cycles ? ` · graded <b>${s.graded_cycles}</b> · realized `
+          +`<b class="${(s.realized_pnl||0)>=0?'pos':'neg'}">${money(s.realized_pnl||0)}</b>`
+          +(s.win_rate!=null?` · win-rate <b>${Math.round(s.win_rate*100)}%</b>`:'') : '')
       : '';
     $('#history').innerHTML=(d.history&&d.history.length)
       ? d.history.map(historyCard).join('')

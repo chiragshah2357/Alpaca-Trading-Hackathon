@@ -94,6 +94,12 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 state = run_cycle(_State.source, _State.store)
                 _State.ledger.record_cycle(state, mode=_State.mode)
+                try:  # self-grade any now-expired past cycles
+                    from grade import grade_ledger
+
+                    grade_ledger(_State.ledger, price_lookup=_State.source.latest_price)
+                except Exception:
+                    pass
                 self._send(200, json.dumps({
                     "decision": state.get("decision"),
                     "execution": state.get("execution"),
