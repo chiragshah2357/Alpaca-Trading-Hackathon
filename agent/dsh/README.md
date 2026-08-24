@@ -1,20 +1,23 @@
 # DSH local harness
 
-このbundleは既存のdeterministic risk engineをDSHの単一agentへ接続します。
-モデルに公開するtoolは次の2つだけです。
+This bundle connects the existing deterministic risk engine to a single DSH agent.
+The model can access exactly three tools:
 
-- `get_decision_context`: risk snapshotと選択可能な候補を取得
-- `submit_decision`: 候補を1つ選び、deterministic gateで検証してpaper dry-runを記録
-- `get_alpaca_readonly_snapshot`: 公式Alpaca MCPからpaper account/positionsと
-  SPY market dataを読み取り（注文・取消・account変更toolは非公開）
+- `get_decision_context`: retrieves the risk snapshot and the admissible candidates.
+- `submit_decision`: selects one candidate, validates it through the deterministic
+  gate, and records a paper dry run.
+- `get_alpaca_readonly_snapshot`: reads the paper account, positions, and SPY market
+  data through the official Alpaca MCP server. Order, cancellation, and account
+  mutation tools are not exposed.
 
-モデルは銘柄、注文、数量、risk値を自由生成できません。`submit_decision`の成功結果も
-`human_approval_required: true`であり、Alpacaへは送信されません。
+The model cannot invent symbols, orders, quantities, or risk values. A successful
+`submit_decision` result still has `human_approval_required: true` and is never sent
+to Alpaca.
 
 ## Setup
 
-Node.js 22以上を使用します。DSHはdeveloper previewのため、`package-lock.json`に
-`0.1.1-rc.2`系の依存関係を固定しています。
+Use Node.js 22 or later. DSH is a developer preview, so the `package-lock.json`
+pins the `0.1.1-rc.2` dependency line.
 
 ```bash
 cd agent/dsh
@@ -25,8 +28,9 @@ DSH_HOME="$PWD/../../.dsh" ./node_modules/.bin/dsh \
 
 ## Keyless verification
 
-HF token、Alpaca key、Modal secretを使わずに、calm / elevated / stressedの3状態を
-official replay adapterで通します。
+The verification suite runs the calm, elevated, and stressed scenarios through
+the official replay adapter without using an HF token, Alpaca credentials, or a
+Modal secret.
 
 ```bash
 cd agent/dsh
@@ -37,15 +41,15 @@ cd ../..
 python3 -m unittest discover -s tests -v
 ```
 
-`test:profile`は一時ディレクトリ内にDSH_HOMEとdry-run ledgerを作成します。
-実account、remote model、paper orderには接続しません。
-`test:alpaca-schema`は非secret placeholderでofficial serverを構築して`tools/list`だけを
-検証し、Alpaca API toolは呼びません。
+`test:profile` creates a temporary `DSH_HOME` and dry-run ledger. It does not
+connect to a real account, remote model, or paper-order endpoint.
+`test:alpaca-schema` starts the official server with non-secret placeholders and
+calls only `tools/list`; it does not invoke an Alpaca API tool.
 
-## Alpaca paper read-only
+## Alpaca paper read-only boundary
 
-`get_alpaca_readonly_snapshot`は`alpaca-mcp-server==2.2.1`をstdio child processとして
-起動し、次の5 toolだけを内部allowlistから呼びます。
+`get_alpaca_readonly_snapshot` starts `alpaca-mcp-server==2.2.1` as a stdio child
+process and calls only this internal allowlist:
 
 - `get_account_info`
 - `get_all_positions`
@@ -53,13 +57,19 @@ python3 -m unittest discover -s tests -v
 - `get_stock_latest_trade`
 - `get_option_chain`
 
-official server側にorder/close/config更新toolが存在してもDSH modelへ登録されません。
-credentialはDSH processの`ALPACA_API_KEY` / `ALPACA_SECRET_KEY`からchild processへだけ渡し、
-設定・session・ledgerへ書きません。常に`ALPACA_PAPER_TRADE=true`、free data feedはstock
-`iex` / option `indicative`です。
-account ID、account number、user IDなどの識別子はmodel/sessionへ返す前にrecursiveに除去し、
-外部文字列・配列・result全体にも上限を設けます。
+Even though the official server also provides order, close-position, cancellation,
+exercise, and account-configuration tools, those tools are never registered with
+the DSH model.
 
-現在のlocal環境にcredentialがない場合、toolはAPI接続前にfail-closedします。credentialを
-追加した後、最初はこのread-only toolだけを実行し、paper account IDなどの不要な個人情報を
-ログやcommitへ残さないでください。
+Credentials are passed only from the DSH process environment to the MCP child via
+`ALPACA_API_KEY` and `ALPACA_SECRET_KEY`. They are not written to configuration,
+sessions, or the ledger. The connection always sets `ALPACA_PAPER_TRADE=true`; the
+free-data feeds are `iex` for stocks and `indicative` for options.
+
+Account IDs, account numbers, user IDs, and related identifiers are removed
+recursively before a result reaches the model or session. External strings, arrays,
+and the total result size are also bounded.
+
+If credentials are absent, the tool fails closed before connecting to the API.
+When credentials become available, run only this read-only tool first and never put
+paper-account identifiers or credentials in logs or commits.
