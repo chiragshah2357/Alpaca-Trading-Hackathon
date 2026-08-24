@@ -50,6 +50,12 @@ def main() -> int:
     day_pnl = float(os.getenv("DAY_PNL_PCT", "0") or 0.0)
 
     result = run_cycle(source, state, day_pnl_pct=day_pnl)
+
+    from ledger import TradeLedger
+
+    ledger = TradeLedger(os.getenv("AGENT_LEDGER_PATH", "state/ledger.jsonl"))
+    ledger.record_cycle(result, mode="LIVE" if have_creds else "MOCK")
+
     print(f"[{mode}] {result['log']}")
     return 0
 

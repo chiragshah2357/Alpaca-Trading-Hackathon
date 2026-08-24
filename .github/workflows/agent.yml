@@ -42,7 +42,7 @@ jobs:
         run: |
           git config user.name "alpaca-agent-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add state/state.json
+          git add -f state/state.json state/ledger.jsonl   # -f: they're gitignored locally
           if git diff --staged --quiet; then
             echo "no state change to commit"
           else

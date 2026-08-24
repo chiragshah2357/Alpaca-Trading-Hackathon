@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -35,15 +34,16 @@ class _State:
     source = None
     mode = "MOCK"
     store = None
-    history = []  # newest-first record of cycles run via the UI
+    ledger = None  # shared, persistent trade ledger (also written by the cron agent)
 
 
 def _init() -> None:
     from feed import StateStore
+    from ledger import TradeLedger
 
     _State.source, _State.mode = _make_source()
     _State.store = StateStore(os.getenv("AGENT_STATE_PATH", "state/state.json"))
-    _State.history = []
+    _State.ledger = TradeLedger(os.getenv("AGENT_LEDGER_PATH", "state/ledger.jsonl"))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -80,7 +80,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}))
             return
         if self.path.startswith("/api/history"):
-            self._send(200, json.dumps({"history": _State.history}))
+            self._send(200, json.dumps({"history": _State.ledger.entries(limit=25)}))
+            return
+        if self.path.startswith("/api/summary"):
+            self._send(200, json.dumps(_State.ledger.summary()))
             return
         self._send(404, json.dumps({"error": "not found"}))
 
@@ -90,14 +93,7 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 state = run_cycle(_State.source, _State.store)
-                ex = state.get("execution") or {}
-                _State.history.insert(0, {
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "posture": (state.get("decision") or {}).get("posture", ""),
-                    "orders": ex.get("orders", []),
-                    "log": state.get("log", ""),
-                })
-                del _State.history[25:]
+                _State.ledger.record_cycle(state, mode=_State.mode)
                 self._send(200, json.dumps({
                     "decision": state.get("decision"),
                     "execution": state.get("execution"),

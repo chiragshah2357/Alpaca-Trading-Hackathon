@@ -103,6 +103,7 @@
   <div id="out" class="out"></div>
 
   <h2>Cycle history — what it has done</h2>
+  <div id="histsummary" class="carry" style="margin:-4px 0 10px"></div>
   <div id="history" class="grid cards"></div>
 
   <div class="foot">Auto-refreshes every 30s. Execution is a dry-run stub — “Approve” shows the orders it
@@ -190,14 +191,18 @@ function positionCard(p){
 
 function historyCard(h){
   const pos=(h.posture||'').split(' ')[0]||'SIT';
+  const t=(h.ts||'').replace('T',' ').slice(11,19) || (h.ts||'');
   const orders=(h.orders||[]).map(o=>`${o.structure.replace(/_/g,' ')} ${o.symbol} x${o.contracts}`);
   const list = orders.length ? orders.map(o=>`<div class="legrow"><span>·</span><b>${o}</b></div>`).join('')
                              : `<div class="legrow"><span>·</span><b>no trades</b></div>`;
+  const live = h.dry_run===false ? '<span class="chip c-credit">live</span>' : '<span class="chip c-debit">dry</span>';
   return `<div class="card">
-    <div class="top"><span class="chip c-sym">${h.time}</span>
+    <div class="top"><span class="chip c-sym">#${h.id} ${t}</span>
       <span class="tag t-${pos}" style="font-size:11px;padding:3px 9px">${pos}</span>
-      <span class="spacer"></span><span class="carry">${(h.orders||[]).length} orders</span></div>
-    <div class="body">${list}</div></div>`;
+      <span class="spacer"></span>${live}<span class="carry">${(h.orders||[]).length} orders</span></div>
+    <div class="body">${list}
+      <div class="kv"><span class="k">credit</span><span class="v pos">${money(h.credit||0)}</span></div>
+    </div></div>`;
 }
 
 async function loadPositions(){
@@ -211,10 +216,15 @@ async function loadPositions(){
 
 async function loadHistory(){
   try{
-    const r=await fetch('/api/history'); const d=await r.json();
+    const [hr,sr]=await Promise.all([fetch('/api/history'),fetch('/api/summary')]);
+    const d=await hr.json(); const s=await sr.json();
+    $('#histsummary').innerHTML = s.cycles
+      ? `<b>${s.cycles}</b> cycles · <b class="pos">${money(s.total_credit)}</b> credit collected · `
+        +`<b>${s.orders_placed}</b> orders · <b>${s.hedged_cycles}</b> hedged · <b>${s.live_cycles}</b> live`
+      : '';
     $('#history').innerHTML=(d.history&&d.history.length)
       ? d.history.map(historyCard).join('')
-      : '<div class="card"><div class="body" style="color:var(--dim)">No cycles yet — click “Approve &amp; run cycle” to record one.</div></div>';
+      : '<div class="card"><div class="body" style="color:var(--dim)">No cycles yet — click “Approve &amp; run cycle”, or let the cron agent run.</div></div>';
   }catch(e){}
 }
 
