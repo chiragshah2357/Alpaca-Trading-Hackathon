@@ -14,10 +14,16 @@ venv/
 env/
 .ipynb_checkpoints/
 
+# Node / DSH local install
+node_modules/
+
 # Local data / logs (thesis log committed explicitly if desired)
 *.log
 *.sqlite
 *.db
+.agent/
+.dsh/
+agent/dsh/tests/replay/.generated.override.json
 
 # OS / editor
 .DS_Store
