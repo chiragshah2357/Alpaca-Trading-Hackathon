@@ -1,7 +1,7 @@
 """One OpenAI-compatible chat client for every provider (README §5).
 
 `langchain-openai` is imported lazily so importing this module never requires it. The
-provider/model/key/base_url all come from `agent/config.py` (i.e. from `.env`).
+provider/model/key/base_url all come from `model/config.py` (i.e. from `.env`).
 """
 from __future__ import annotations
 

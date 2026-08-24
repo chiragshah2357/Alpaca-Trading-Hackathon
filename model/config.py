@@ -3,7 +3,7 @@
 Each role (THESIS = the reasoning brain, FAST = cheap high-frequency) reads its provider
 + model + key from `.env`, so you swap DeepSeek <-> OpenAI <-> Groq <-> HF by editing
 one file. All providers below expose an OpenAI-compatible endpoint, so one client (see
-`agent/llm.py`) drives them all.
+`model/llm.py`) drives them all.
 """
 from __future__ import annotations
 

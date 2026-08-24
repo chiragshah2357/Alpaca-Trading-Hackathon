@@ -147,7 +147,7 @@ def make_llm_decider(
 
 def _real_completion(role: str):
     def _fn(system: str, user: str) -> str:
-        from agent.llm import complete
+        from model.llm import complete
 
         return complete(system, user, role=role)
     return _fn

@@ -4,8 +4,8 @@ langchain-core
 python-dotenv
 
 # Broader agent stack (listed now; wired up as we build — README §12)
+# (LangGraph dropped — the harness is a plain Python loop; DSH is the model harness)
 langchain
-langgraph
 langchain-mcp-adapters
 alpaca-py
 
