@@ -84,6 +84,9 @@
   <div id="posture" class="posture"><span class="tag t-SIT">…</span><span class="carry">loading…</span></div>
   <div id="metrics" class="grid metrics"></div>
 
+  <h2>Open positions — what the agent holds</h2>
+  <div id="positions" class="grid cards"></div>
+
   <h2>Income overlay — premium sold this cycle</h2>
   <div id="income" class="grid cards"></div>
 
@@ -98,6 +101,9 @@
     <button class="revise" onclick="note('Revise — adjust posture in the DECIDE node (harness/llm.py).')">✎ Revise</button>
   </div>
   <div id="out" class="out"></div>
+
+  <h2>Cycle history — what it has done</h2>
+  <div id="history" class="grid cards"></div>
 
   <div class="foot">Auto-refreshes every 30s. Execution is a dry-run stub — “Approve” shows the orders it
     would place, not real trades. Set ALPACA_* to switch from MOCK to LIVE data.</div>
@@ -174,7 +180,46 @@ function render(ctx){
       : `<div class="viol" style="color:var(--dim)">No violations. Plan is risk-validated and safe to execute.</div>`);
 }
 
+function positionCard(p){
+  return `<div class="card">
+    <div class="top"><span class="chip c-sym">${p.symbol}</span><span class="name">${p.shares} sh</span>
+      <span class="spacer"></span><span class="carry">@ $${p.price.toLocaleString()}</span></div>
+    <div class="body"><div class="kv"><span class="k">market value</span><span class="v">${money(p.market_value)}</span></div></div>
+  </div>`;
+}
+
+function historyCard(h){
+  const pos=(h.posture||'').split(' ')[0]||'SIT';
+  const orders=(h.orders||[]).map(o=>`${o.structure.replace(/_/g,' ')} ${o.symbol} x${o.contracts}`);
+  const list = orders.length ? orders.map(o=>`<div class="legrow"><span>·</span><b>${o}</b></div>`).join('')
+                             : `<div class="legrow"><span>·</span><b>no trades</b></div>`;
+  return `<div class="card">
+    <div class="top"><span class="chip c-sym">${h.time}</span>
+      <span class="tag t-${pos}" style="font-size:11px;padding:3px 9px">${pos}</span>
+      <span class="spacer"></span><span class="carry">${(h.orders||[]).length} orders</span></div>
+    <div class="body">${list}</div></div>`;
+}
+
+async function loadPositions(){
+  try{
+    const r=await fetch('/api/positions'); const d=await r.json();
+    $('#positions').innerHTML=(d.positions&&d.positions.length)
+      ? d.positions.map(positionCard).join('')
+      : '<div class="card"><div class="body" style="color:var(--dim)">No open positions.</div></div>';
+  }catch(e){}
+}
+
+async function loadHistory(){
+  try{
+    const r=await fetch('/api/history'); const d=await r.json();
+    $('#history').innerHTML=(d.history&&d.history.length)
+      ? d.history.map(historyCard).join('')
+      : '<div class="card"><div class="body" style="color:var(--dim)">No cycles yet — click “Approve &amp; run cycle” to record one.</div></div>';
+  }catch(e){}
+}
+
 async function load(){
+  loadPositions();
   try{
     const r=await fetch('/api/context'); const ctx=await r.json();
     if(ctx.error){ $('#critic').innerHTML='<span class="err">Engine error: '+ctx.error+'</span>'; return; }
@@ -195,10 +240,11 @@ async function cycle(){
       return `  ${o.structure}  ${o.symbol} x${o.contracts} (${o.net_side}, ${o.expiry_days}d): ${legs}`;
     });
     note(`DRY-RUN — orders that would be placed:\n${lines.join('\n')||'  (none)'}\n\n${s.log||''}`);
+    loadHistory();
   }catch(e){ note('Cannot reach the agent server.'); }
 }
 
-load(); setInterval(load, 30000);
+load(); loadHistory(); setInterval(load, 30000);
 </script>
 </body>
 </html>

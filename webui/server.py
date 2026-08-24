@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class _State:
     source = None
     mode = "MOCK"
     store = None
+    history = []  # newest-first record of cycles run via the UI
 
 
 def _init() -> None:
@@ -41,6 +43,7 @@ def _init() -> None:
 
     _State.source, _State.mode = _make_source()
     _State.store = StateStore(os.getenv("AGENT_STATE_PATH", "state/state.json"))
+    _State.history = []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -67,6 +70,18 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:  # surface engine errors to the page
                 self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}))
             return
+        if self.path.startswith("/api/positions"):
+            try:
+                rows = _State.source.positions()
+                out = [{"symbol": s, "shares": sh, "price": px,
+                        "market_value": round(sh * px, 2)} for (s, sh, px) in rows]
+                self._send(200, json.dumps({"positions": out}))
+            except Exception as e:
+                self._send(500, json.dumps({"error": f"{type(e).__name__}: {e}"}))
+            return
+        if self.path.startswith("/api/history"):
+            self._send(200, json.dumps({"history": _State.history}))
+            return
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self) -> None:
@@ -75,6 +90,14 @@ class Handler(BaseHTTPRequestHandler):
 
             try:
                 state = run_cycle(_State.source, _State.store)
+                ex = state.get("execution") or {}
+                _State.history.insert(0, {
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "posture": (state.get("decision") or {}).get("posture", ""),
+                    "orders": ex.get("orders", []),
+                    "log": state.get("log", ""),
+                })
+                del _State.history[25:]
                 self._send(200, json.dumps({
                     "decision": state.get("decision"),
                     "execution": state.get("execution"),
