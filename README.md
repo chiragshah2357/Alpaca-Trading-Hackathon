@@ -194,12 +194,22 @@ strategy and the demo do — so we won't sink the week into it.**
 
 ### Runtime
 
-Move **off GitHub Actions cron** to an **always‑on runtime (Modal CPU).
-** Reason: a hedging agent needs *continuous* monitoring (stop‑losses, hedge
-drift, expiries), not a check every 15 minutes with gaps in between. "Event‑driven"
-means: subscribe to Alpaca's live stream for fills/quotes + a news trigger, and act
-when something actually happens. State is still checkpointed to a DB each cycle, so
-a crash just resumes.
+**Decision: GitHub Actions is the runtime.** A scheduled workflow
+([.github/workflows/agent.yml](.github/workflows/agent.yml)) runs one agent cycle every
+30 min during US market hours (`*/30 13-21 * * 1-5` UTC) and commits the updated
+`state/state.json` + `state/ledger.jsonl` back to the repo, so state persists across runs
+with **zero infrastructure to stand up or pay for** — the right call under a one‑week
+deadline. `scripts/run_agent.py` is the single entry point (used by the workflow and for
+local one‑shot runs); `git` is the state store.
+
+The tradeoff we're accepting: a 30‑min heartbeat has gaps, so this is periodic
+monitoring, not the *continuous* stream a mature hedging agent eventually wants
+(stop‑losses, hedge drift, expiries reacting the moment something happens). An
+**always‑on, event‑driven runtime** (e.g. Modal CPU subscribing to Alpaca's live
+fill/quote stream) is the natural next step **post‑hackathon** — but it buys continuity
+we don't need to demo the thesis, at a cost in setup we can't spare now. State is already
+checkpointed every cycle, so swapping the scheduler later is a runtime change, not a
+rewrite.
 
 ---
 
@@ -680,7 +690,8 @@ live risk‑regime gauge. Creativity + Presentation are our strongest categories
   discretionary stock‑picking).
 - **Models** — Kimi K3 (reasoning) + Gemma 4 31B on Cerebras (fast lane), paid HF,
   cost non‑issue.
-- **Runtime** — always‑on (Modal), event‑driven + heartbeat, state checkpointed.
+- **Runtime** — GitHub Actions scheduled workflow (30‑min heartbeat, state committed
+  back to the repo); always‑on/event‑driven (Modal) deferred to post‑hackathon.
 - **Profit engine** — core returns + financed collars + selling overpriced premium.
 - **Math engine** — §7 above, all deterministic.
 

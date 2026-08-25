@@ -3,7 +3,7 @@ name: agent
 # Runs one agent cycle on a schedule during ~US market hours, and persists state back.
 # NOTE: scheduled workflows only fire on the DEFAULT branch (main) — this activates once
 # merged. Test on a branch with the "Run workflow" button (workflow_dispatch) or locally
-# via `python run_agent.py`.
+# via `python scripts/run_agent.py`.
 on:
   schedule:
     - cron: "*/30 13-21 * * 1-5"   # every 30 min, ~13:00-21:00 UTC, Mon-Fri (covers US DST)
@@ -35,7 +35,7 @@ jobs:
           ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           ALPACA_PAPER: "true"
-        run: python run_agent.py
+        run: python scripts/run_agent.py
 
       - name: Persist state.json
         if: always()

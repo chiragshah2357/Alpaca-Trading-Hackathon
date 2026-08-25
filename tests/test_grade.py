@@ -6,8 +6,8 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from grade import grade_entry, grade_ledger
-from ledger import TradeLedger
+from runtime.grade import grade_entry, grade_ledger
+from runtime.ledger import TradeLedger
 
 
 def _condor_entry(**over):

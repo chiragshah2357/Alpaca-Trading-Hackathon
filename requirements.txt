@@ -1,18 +1,11 @@
-# Model layer (needed to actually build/call models)
-langchain-openai
-langchain-core
+# Env loading for local runs (containers/CI pass env directly)
 python-dotenv
 
-# Broader agent stack (listed now; wired up as we build — README §12)
-# (LangGraph dropped — the harness is a plain Python loop; DSH is the model harness)
-langchain
-langchain-mcp-adapters
+# Alpaca market data + paper trading (feed/alpaca.py)
 alpaca-py
 
-# Optional native provider clients — only if you prefer them over the
-# OpenAI-compatible path in agent/llm.py:
-# langchain-groq
-# langchain-google-genai
-# langchain-cerebras
+# NOTE: langchain / langgraph removed — the model brain and MCP connection live in the
+# DSH harness now, not in this repo. The retired langchain LLM client (model/) and MCP
+# executor (harness/mcp_executor.py) are preserved under _archive/ if ever needed.
 
 # Pin exact versions after the first clean install:  pip freeze > requirements.lock

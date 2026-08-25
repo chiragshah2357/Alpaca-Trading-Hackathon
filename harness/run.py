@@ -1,9 +1,9 @@
-"""Run one agent cycle — the entry point the cron job / loop calls (README §6).
+"""Run one agent cycle — the entry point the scheduled job calls (README §6).
 
 `run_cycle(...)` executes measure -> decide -> (execute) -> log once and returns the
-final state. It's a plain, dependency-free sequential runner (no LangGraph).
+final state. It's a plain, dependency-free sequential runner.
 
-A GitHub Actions cron job (or the container loop) runs this once per invocation; state
+The GitHub Actions scheduled workflow runs this once per invocation; state
 (peak mark + IV history) persists via the StateStore between runs.
 """
 from __future__ import annotations

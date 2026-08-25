@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from harness import make_llm_decider
-from skills import discover_skills, load_skills
+from runtime.skills import discover_skills, load_skills
 
 
 def _skills_dir():

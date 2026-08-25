@@ -7,9 +7,14 @@ Runs one base book through THREE market regimes and prints the unified strategy 
     ELEVATED  rich IV, still risk-on    -> HARVEST  (sell premium — the P&L engine)
     STRESSED  rich IV, risk-off + drawdown -> DEFEND (income stands down, hedge steps in)
 
-    python demo_strategy.py
+    python examples/demo_strategy.py
 """
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root on sys.path
 
 from risk_engine import (
     MarketData,

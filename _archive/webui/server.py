@@ -8,7 +8,7 @@ CURRENT risk-validated decision as trade-memo cards (like the Alpaca screenshot)
     POST /api/cycle    -> run one full decide+execute (dry-run) cycle, return result
 
 Uses live Alpaca data when ALPACA_API_KEY/ALPACA_SECRET_KEY are set, else MockDataSource.
-Run via `python run_webui.py`.
+Run via `python scripts/run_webui.py`.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class _State:
 
 def _init() -> None:
     from feed import StateStore
-    from ledger import TradeLedger
+    from runtime.ledger import TradeLedger
 
     _State.source, _State.mode = _make_source()
     _State.store = StateStore(os.getenv("AGENT_STATE_PATH", "state/state.json"))
@@ -61,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
                        "text/html; charset=utf-8")
             return
         if self.path.startswith("/api/context"):
-            from strategy_api import get_strategy_context
+            from runtime.strategy_api import get_strategy_context
 
             try:
                 ctx = get_strategy_context(_State.source, _State.store)
@@ -95,7 +95,7 @@ class Handler(BaseHTTPRequestHandler):
                 state = run_cycle(_State.source, _State.store)
                 _State.ledger.record_cycle(state, mode=_State.mode)
                 try:  # self-grade any now-expired past cycles
-                    from grade import grade_ledger
+                    from runtime.grade import grade_ledger
 
                     grade_ledger(_State.ledger, price_lookup=_State.source.latest_price)
                 except Exception:

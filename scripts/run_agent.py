@@ -4,13 +4,15 @@ Uses live Alpaca data when ALPACA_API_KEY/ALPACA_SECRET_KEY are set, else MockDa
 Persists engine state + the trade ledger between runs. Execution is still the dry-run
 stub, so this is SAFE to schedule now (observes + logs the plan, places no real orders).
 
-    python run_agent.py
-
-`build_context()` + `run_once()` are also reused by the always-on scheduler (loop.py).
+    python scripts/run_agent.py
 """
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root on sys.path
 
 
 def _load_env() -> None:
@@ -23,17 +25,11 @@ def _load_env() -> None:
 
 
 def make_decider():
-    """Pick the DECIDE-node decider from env.
+    """The DECIDE-node decider: approve the risk-validated plan unchanged.
 
-    USE_LLM=1 -> the real LLM decider with Alpaca skills (AGENT_SKILLS_DIR) injected as
-    prompt context; otherwise the deterministic stub (approve the risk-validated plan).
+    Real judgment (approve / reduce / skip) now lives in the DSH harness, so this
+    in-house node is just the deterministic stub that lets a cycle run end-to-end.
     """
-    if os.getenv("USE_LLM", "0").lower() in ("1", "true", "yes"):
-        from harness import make_llm_decider
-        from skills import load_skills
-
-        skills_text = load_skills(os.getenv("AGENT_SKILLS_DIR", "skills"))
-        return make_llm_decider(role=os.getenv("LLM_ROLE", "THESIS"), skills=skills_text)
     from harness import default_decider
 
     return default_decider
@@ -43,7 +39,7 @@ def build_context():
     """Construct (source, state, ledger, mode, decider) once — reused across cycles."""
     _load_env()
     from feed import StateStore
-    from ledger import TradeLedger
+    from runtime.ledger import TradeLedger
 
     have_creds = bool(os.getenv("ALPACA_API_KEY") and os.getenv("ALPACA_SECRET_KEY"))
     if have_creds:
@@ -70,7 +66,7 @@ def run_once(source, state, ledger, mode: str, decider=None) -> dict:
 
     # Self-grade any past cycles whose options have now expired (README §8).
     try:
-        from grade import grade_ledger
+        from runtime.grade import grade_ledger
 
         grade_ledger(ledger, price_lookup=source.latest_price)
     except Exception as e:
