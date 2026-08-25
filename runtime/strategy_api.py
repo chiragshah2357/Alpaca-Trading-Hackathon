@@ -5,12 +5,12 @@ JSON-serializable dict:
 
     OBSERVE (feed) -> MEASURE (assess) -> plan_strategy -> validate_plan (risk caps)
 
-The LangGraph/DSH agent calls this in its "measure" node, hands the JSON to its LLM
+The DSH agent calls this in its "measure" node, hands the JSON to its LLM
 "decide" node, then executes the (already risk-checked) legs. Harness-agnostic: it only
 needs a `DataSource` and a `StateStore`.
 
     from feed import AlpacaDataSource, StateStore
-    from strategy_api import get_strategy_context
+    from runtime.strategy_api import get_strategy_context
     ctx = get_strategy_context(AlpacaDataSource(), StateStore("state.json"))
     # ctx["plan"] -> what to trade;  ctx["validation"] -> what was capped
 """

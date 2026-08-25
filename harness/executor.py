@@ -5,9 +5,10 @@ The decision -> order translation lives in `orders.py`; here we just submit each
 
   * `default_executor`  — DRY RUN: lists the exact orders (with legs) it would place.
   * `BrokerExecutor(broker)` — submits each intent through any `Broker`
-    (`DryRunBroker`, a test fake, or `McpBroker` from mcp_executor.py for live Alpaca).
+    (`DryRunBroker`, a test fake, or a live Alpaca broker — the DSH harness owns live
+    MCP order placement now; the retired in-house `McpBroker` is in _archive/).
 
-Swap the stub for `BrokerExecutor(McpBroker(...))` when you're ready to trade — nothing
+Swap the stub for `BrokerExecutor(<live broker>)` when you're ready to trade — nothing
 upstream changes.
 """
 from __future__ import annotations

@@ -1,8 +1,7 @@
 """Tests for the harness skeleton — the agent loop wiring (dependency-free runner).
 
 Covers the node routing and a full cycle with the offline MockDataSource + stubs, so
-the loop is verified without an LLM or Alpaca. The DECIDE node is the `default_decider`
-stub (real judgment lives in the DSH harness now).
+the loop is verified without LangGraph or Alpaca.
 """
 from __future__ import annotations
 
@@ -14,11 +13,19 @@ from feed import MockDataSource, StateStore
 from harness import (
     BrokerExecutor,
     default_decider,
+    make_llm_decider,
     plan_to_orders,
     run_cycle,
 )
 from harness import nodes
 from harness.orders import OrderIntent
+
+
+def _harvest_context():
+    """A realistic harvest-cycle context (income legs present) for decider tests."""
+    tmp = Path(tempfile.mkdtemp(prefix="ctx_")) / "s.json"
+    from runtime.strategy_api import get_strategy_context
+    return get_strategy_context(MockDataSource(), StateStore(tmp))
 
 
 class TestHarness(unittest.TestCase):
@@ -113,6 +120,57 @@ class TestOrders(unittest.TestCase):
         self.assertEqual(broker.seen, ["covered_call"])
         self.assertFalse(out["dry_run"])
         self.assertEqual(len(out["results"]), 1)
+
+
+class TestLlmDecider(unittest.TestCase):
+    def test_approve(self):
+        ctx = _harvest_context()
+        original = len(ctx["plan"]["income"]["legs"])
+        self.assertGreater(original, 0)
+        decider = make_llm_decider(
+            lambda s, u: '{"action":"approve","size_factor":1.0,"reasoning":"calm"}'
+        )
+        d = decider(ctx)
+        self.assertTrue(d["approved"])
+        self.assertEqual(len(d["income_legs"]), original)
+
+    def test_reduce_scales_down(self):
+        ctx = _harvest_context()
+        decider = make_llm_decider(
+            lambda s, u: '{"action":"reduce","size_factor":0.5,"reasoning":"CPI tomorrow"}'
+        )
+        d = decider(ctx)
+        condor = next(l for l in ctx["plan"]["income"]["legs"] if l["kind"] == "iron_condor")
+        new_condor = next(l for l in d["income_legs"] if l["kind"] == "iron_condor")
+        self.assertLess(new_condor["contracts"], condor["contracts"])
+        self.assertLess(new_condor["credit"], condor["credit"])  # $ fields scale too
+
+    def test_skip_clears_income_but_keeps_hedge(self):
+        ctx = _harvest_context()
+        decider = make_llm_decider(
+            lambda s, u: 'sure!\n{"action":"skip","reasoning":"FOMC risk"}\nthanks'
+        )
+        d = decider(ctx)
+        self.assertFalse(d["approved"])
+        self.assertEqual(d["income_legs"], [])
+        self.assertEqual(d["hedge"], ctx["plan"]["hedge"])  # hedge never dropped
+
+    def test_fallback_on_model_error(self):
+        ctx = _harvest_context()
+        def boom(s, u):
+            raise RuntimeError("no api key")
+        d = make_llm_decider(boom, fallback="approve")(ctx)
+        self.assertTrue(d["approved"])  # loop stays alive
+        self.assertIn("fell back", d["reasoning"])
+
+    def test_llm_decider_runs_through_full_cycle(self):
+        tmp = StateStore(Path(tempfile.mkdtemp(prefix="llm_")) / "s.json")
+        decider = make_llm_decider(
+            lambda s, u: '{"action":"reduce","size_factor":0.5,"reasoning":"trim"}'
+        )
+        state = run_cycle(MockDataSource(), tmp, decider=decider)
+        self.assertIn("execution", state)
+        self.assertTrue(state["execution"]["dry_run"])
 
 
 if __name__ == "__main__":

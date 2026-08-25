@@ -2,8 +2,9 @@
 
 This is the deterministic bridge between "what the engine decided" and "what the broker
 places." Each income leg / hedge becomes an `OrderIntent` with its exact option legs
-(right, strike, buy/sell). A `Broker` then submits each intent — a `DryRunBroker`, an
-`McpBroker` (Alpaca MCP), or a test fake — without this translation layer changing.
+(right, strike, buy/sell). A `Broker` then submits each intent — a `DryRunBroker`, a
+live broker (the DSH harness places orders via MCP), or a test fake — without this
+translation layer changing.
 
 Strikes + `expiry_days` are as the engine sized them; the broker resolves `expiry_days`
 to the nearest listed expiration and the strikes to real listed contracts.

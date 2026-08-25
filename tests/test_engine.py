@@ -30,7 +30,7 @@ from risk_engine import (
 from risk_engine import blackscholes as bs
 from risk_engine import metrics, payoffs, scoring
 from feed import MockDataSource, StateStore, compute_beta, moving_average, observe
-from strategy_api import get_strategy_context
+from runtime.strategy_api import get_strategy_context
 
 
 # --- shared fixtures --------------------------------------------------------

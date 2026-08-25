@@ -1,13 +1,12 @@
 """The agent-loop nodes (README §4), written framework-agnostic.
 
 Each node is a small pure-ish function that takes what it needs and returns a partial
-state update (the LangGraph convention). `graph.py` wraps these for LangGraph; `run.py`
-runs them directly with no dependency. Keeping the logic here means the graph and the
-manual runner never drift apart.
+state update. `run.py` runs them directly with no framework dependency. Keeping the
+logic in these small functions means the runner stays simple and easy to test.
 """
 from __future__ import annotations
 
-from strategy_api import get_strategy_context
+from runtime.strategy_api import get_strategy_context
 
 from .executor import default_executor
 from .llm import default_decider
