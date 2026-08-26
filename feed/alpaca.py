@@ -81,9 +81,9 @@ class AlpacaDataSource:
         """Submit a day market buy order on the configured Alpaca account; returns the order id.
 
         The account mode (paper vs live) follows how this `AlpacaDataSource` was
-        constructed — `ALPACA_PAPER` defaults to true (paper). Seeding the core book is
-        intended for the paper account; callers placing on a live-constructed source
-        do so deliberately.
+        constructed — `ALPACA_PAPER` defaults to true (paper). This write path is
+        **paper-only**: it raises if the source is live-constructed (fail-closed), so
+        seeding can never place a live order.
 
         Kept on the concrete `AlpacaDataSource` (not the read-only `DataSource`
         protocol) because OBSERVE never places orders — this is for one-off seeding

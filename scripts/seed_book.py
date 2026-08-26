@@ -13,6 +13,7 @@ paper market orders.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -85,22 +86,27 @@ def main() -> int:
         print("\ndry run — nothing placed. Re-run with --execute to submit these paper orders.")
         return 0
 
+    attempted = 0
     placed = 0
     for sym, _tgt, buy, _px, _d in rows:
         if buy <= 0:
             continue  # nothing to buy — skip non-positive deltas before placing
+        # Validate locally with the same whole-share tolerance as submit_market_order,
+        # so genuinely fractional deltas (e.g. fractional-share holdings) are skipped
+        # explicitly instead of surfacing as exception noise.
+        buy_qty = round(buy)
+        if not math.isclose(buy, buy_qty, rel_tol=0.0, abs_tol=1e-6):
+            print(f"  ! skip {sym}: fractional buy {buy} not near a whole share")
+            continue
+        buy_qty = int(buy_qty)
+        attempted += 1
         try:
-            # submit_market_order validates whole-share qty (rounds near-integer float
-            # sizing to the nearest share, raises on genuinely fractional / non-positive);
-            # the logged count matches the rounded value it actually submits.
-            order_id = source.submit_market_order(sym, buy)
-            print(f"  placed {sym}: buy {int(round(buy))} -> order {order_id}")
+            order_id = source.submit_market_order(sym, buy_qty)
+            print(f"  placed {sym}: buy {buy_qty} -> order {order_id}")
             placed += 1
-        except (TypeError, ValueError) as e:
-            print(f"  ! invalid qty for {sym}: {e}")
         except Exception as e:
             print(f"  ! order failed for {sym}: {type(e).__name__}: {e}")
-    print(f"\nsubmitted {placed}/{len(rows)} orders (paper). Market must be open for market orders to fill.")
+    print(f"\nsubmitted {placed}/{attempted} orders (paper). Market must be open for market orders to fill.")
     return 0
 
 
