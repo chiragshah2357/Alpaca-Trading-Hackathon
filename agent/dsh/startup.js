@@ -12,9 +12,13 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 function command() {
   return new Command()
     .name('dsh --profile portfolio-agent')
-    .description('Run one bounded regime-adaptive portfolio decision.')
+    .description('Run a bounded regime-adaptive portfolio decision, once or on a heartbeat.')
     .helpOption('-h, --help', 'show this help')
-    .requiredOption('--scenario <name>', 'fixed scenario: calm, elevated, or stressed')
+    .option('--scenario <name>', 'fixed scenario: calm, elevated, or stressed')
+    .option('--live', 'observe the live Alpaca paper account instead of a fixture', false)
+    .option('--heartbeat', 'run continuously on an interval instead of one shot', false)
+    .option('--interval <ms>', 'heartbeat interval in milliseconds', String(1_800_000))
+    .option('--place', 'autonomously place paper orders for approved decisions', false)
     .option('--ledger <path>', 'dry-run JSONL ledger', '.agent/decisions.jsonl')
     .argument('[instruction...]', 'decision objective')
 }
@@ -24,12 +28,23 @@ export function apply(ctx) {
   program.action((instructionParts, options) => {
     const instruction = instructionParts.join(' ').trim()
     if (instruction === '') program.error('error: an instruction is required')
-    if (!['calm', 'elevated', 'stressed'].includes(options.scenario)) {
+    if (!options.live && !options.scenario) {
+      program.error('error: provide --scenario <name> or --live')
+    }
+    if (options.scenario && !['calm', 'elevated', 'stressed'].includes(options.scenario)) {
       program.error('error: scenario must be calm, elevated, or stressed')
+    }
+    const intervalMs = Number(options.interval)
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+      program.error('error: --interval must be a positive number of milliseconds')
     }
     ctx.provide('portfolioStartup', {
       repositoryRoot,
-      scenario: options.scenario,
+      scenario: options.scenario ?? null,
+      live: Boolean(options.live),
+      heartbeat: Boolean(options.heartbeat),
+      intervalMs,
+      placeOrders: Boolean(options.place),
       ledgerPath: resolve(options.ledger),
       instruction,
     })

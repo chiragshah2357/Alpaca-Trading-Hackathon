@@ -8,8 +8,9 @@ export const name = 'portfolio-runner'
 export const inject = ['agentDefaultModel', 'agents', 'sessions']
 
 export const Config = Schema.object({
-  scenario: Schema.string().required(),
+  scenario: Schema.string(),
   instruction: Schema.string().required(),
+  heartbeat: Schema.boolean().default(false), // when true, portfolio-heartbeat owns the loop
 })
 
 function outcome(events, firstSeq) {
@@ -47,6 +48,7 @@ async function run(ctx, config, io) {
 }
 
 export function apply(ctx, config) {
+  if (config.heartbeat) return // heartbeat mode: the loop plugin drives cycles instead
   const exit = ctx.get('appExit')
   if (exit === undefined) throw new Error('portfolio-runner requires the dsh application launcher')
   const io = { stderr: process.stderr, exit }
