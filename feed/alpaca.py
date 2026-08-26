@@ -13,6 +13,7 @@ engine or the OBSERVE logic.
 """
 from __future__ import annotations
 
+import math
 import os
 from datetime import date, datetime, timedelta
 
@@ -81,12 +82,25 @@ class AlpacaDataSource:
         Kept on the concrete `AlpacaDataSource` (not the read-only `DataSource`
         protocol) because OBSERVE never places orders — this is for one-off seeding
         scripts (scripts/seed_book.py), not the agent loop.
+
+        `qty` must be a positive whole number of shares/contracts. Float sizing math
+        (e.g. seed_book's target - held) can land a hair off an integer (49.999999);
+        we round to the nearest whole share and raise if it is genuinely fractional,
+        so seeding never silently under-buys.
         """
+        if not isinstance(qty, (int, float)) or isinstance(qty, bool):
+            raise TypeError(f"qty must be a number, got {type(qty).__name__}")
+        whole = round(qty)
+        if not math.isclose(qty, whole, rel_tol=0.0, abs_tol=1e-6):
+            raise ValueError(f"qty must be a whole number of shares/contracts, got {qty}")
+        if whole <= 0:
+            raise ValueError(f"qty must be positive, got {qty}")
+
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
 
         req = MarketOrderRequest(
-            symbol=symbol, qty=int(qty), side=OrderSide.BUY, time_in_force=TimeInForce.DAY
+            symbol=symbol, qty=whole, side=OrderSide.BUY, time_in_force=TimeInForce.DAY
         )
         order = self._trading.submit_order(req)
         return getattr(order, "id", "?")

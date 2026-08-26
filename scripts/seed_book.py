@@ -87,9 +87,12 @@ def main() -> int:
 
     placed = 0
     for sym, _tgt, buy, _px, _d in rows:
+        # One validated integer quantity, used for both placement and logging so the
+        # reported count can never disagree with what is actually submitted.
+        buy_qty = int(round(buy))
         try:
-            order_id = source.submit_market_order(sym, buy)
-            print(f"  placed {sym}: buy {int(buy)} -> order {order_id}")
+            order_id = source.submit_market_order(sym, buy_qty)
+            print(f"  placed {sym}: buy {buy_qty} -> order {order_id}")
             placed += 1
         except Exception as e:
             print(f"  ! order failed for {sym}: {type(e).__name__}: {e}")
