@@ -58,6 +58,7 @@ class AlpacaDataSource:
             )
         if paper is None:
             paper = os.getenv("ALPACA_PAPER", "true").lower() != "false"
+        self._paper = paper
 
         self._trading = TradingClient(api_key, secret_key, paper=paper)
         self._stocks = StockHistoricalDataClient(api_key, secret_key)
@@ -92,7 +93,15 @@ class AlpacaDataSource:
         (e.g. seed_book's target - held) can land a hair off an integer (49.999999);
         we round to the nearest whole share and raise if it is genuinely fractional,
         so seeding never silently under-buys.
+
+        Fail-closed: this write path refuses to run against a live-constructed source
+        (`ALPACA_PAPER=false`). Seeding is paper-only by design (no live trading).
         """
+        if not self._paper:
+            raise RuntimeError(
+                "submit_market_order is paper-only (fail-closed); refusing to place on a "
+                "live-constructed AlpacaDataSource (set ALPACA_PAPER=true)."
+            )
         if not isinstance(qty, (int, float)) or isinstance(qty, bool):
             raise TypeError(f"qty must be a number, got {type(qty).__name__}")
         whole = round(qty)
