@@ -27,11 +27,26 @@ test('resolveHedgeContract throws when nothing resolves', () => {
   ), /no listed put resolves/)
 })
 
-test('buildPlaceArgs maps intent to side and carries contract count', () => {
-  const args = buildPlaceArgs({ symbol: 'SPY240920P00520000' }, { intent: 'buy_to_open', contracts: 3 })
-  assert.equal(args.side, 'buy')
-  assert.equal(args.quantity, 3)
+test('buildPlaceArgs maps to the confirmed place_option_order schema', () => {
+  const args = buildPlaceArgs(
+    { symbol: 'SPY240920P00520000' },
+    { intent: 'buy_to_open', contracts: 3, client_order_id: 'dry-abc123' },
+  )
   assert.equal(args.symbol, 'SPY240920P00520000')
+  assert.equal(args.side, 'buy')
+  assert.equal(args.qty, '3') // string, per the server schema
+  assert.equal(args.type, 'market')
+  assert.equal(args.time_in_force, 'day')
+  assert.equal(args.position_intent, 'buy_to_open')
+  assert.equal(args.client_order_id, 'dry-abc123')
+})
+
+test('buildPlaceArgs omits client_order_id when absent', () => {
+  const args = buildPlaceArgs({ symbol: 'SPY240920P00520000' }, { intent: 'sell_to_close', contracts: 2 })
+  assert.equal(args.side, 'sell')
+  assert.equal(args.qty, '2')
+  assert.equal(args.position_intent, 'sell_to_close')
+  assert.equal(args.client_order_id, undefined)
 })
 
 test('placeGateOrders skips non-placeable structures and places the hedge', async () => {

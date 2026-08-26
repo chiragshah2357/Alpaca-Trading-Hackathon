@@ -74,6 +74,23 @@ class AlpacaDataSource:
             out.append((p.symbol, float(p.qty), price))
         return out
 
+    # --- order placement (paper) -------------------------------------------
+    def submit_market_order(self, symbol: str, qty: float) -> str:
+        """Submit a day market buy order on the paper account; returns the order id.
+
+        Kept on the concrete `AlpacaDataSource` (not the read-only `DataSource`
+        protocol) because OBSERVE never places orders — this is for one-off seeding
+        scripts (scripts/seed_book.py), not the agent loop.
+        """
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import MarketOrderRequest
+
+        req = MarketOrderRequest(
+            symbol=symbol, qty=int(qty), side=OrderSide.BUY, time_in_force=TimeInForce.DAY
+        )
+        order = self._trading.submit_order(req)
+        return getattr(order, "id", "?")
+
     # --- prices / bars -----------------------------------------------------
     def daily_closes(self, symbol: str, lookback: int) -> list[float]:
         from alpaca.data.requests import StockBarsRequest

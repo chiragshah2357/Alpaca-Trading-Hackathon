@@ -7,9 +7,9 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 
 test('python bridge exposes the expected fixed candidate sets', () => {
   const expected = {
-    calm: ['hold'],
+    calm: ['hold', 'harvest_income'], // VRP-gated income now fires in calm (premium rich vs realized)
     elevated: ['hold', 'harvest_income'],
-    stressed: ['partial_hedge', 'cost_capped_hedge'],
+    stressed: ['partial_hedge', 'full_hedge'], // short-DTE (5d) protection stays under the cost cap
   }
   for (const [scenario, ids] of Object.entries(expected)) {
     const stdout = execFileSync('python3', ['-m', 'agent.cli', 'context', '--scenario', scenario], {

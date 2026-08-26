@@ -51,7 +51,10 @@ MCP child environment only; the connection is hard-wired to paper mode.
   option repricing is represented separately by its deterministic defined-risk bound.
 - `AgentDecision`: context ID, one candidate ID, and a concise reason.
 - `GateResult`: approval/rejection reasons and exact paper-dry-run orders. Every
-  approved result still requires human approval before any future submission.
+  approved result still requires human approval before any future submission. **Opt-in
+  exception:** when the operator starts the bundle with `--place`, the system (never
+  the model) may auto-place an approved single-leg protective put on the **paper**
+  account. Without `--place`, nothing is ever sent to Alpaca.
 
 ## Explicit non-goals
 

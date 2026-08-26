@@ -90,17 +90,21 @@ function sideFor(intent) {
   throw new Error(`unknown order intent: ${intent}`)
 }
 
-// NOTE: the exact place_option_order parameter names are the ONE thing to confirm against
-// the live server on first run (schema not available offline). Isolated here so it's a
-// single obvious edit. Single-leg, market order, day TIF, paper-enforced by the env above.
+// Confirmed against alpaca-mcp-server 2.2.1 (place_option_order): single-leg orders
+// take qty (string), type, time_in_force, symbol, side, plus optional position_intent
+// and client_order_id (idempotency). The gate's intent maps directly to position_intent;
+// the gate's client_order_id is passed through so a timed-out submit can be retried safely.
 export function buildPlaceArgs(resolved, order) {
-  return {
+  const args = {
     symbol: resolved.symbol,
     side: sideFor(order.intent),
-    quantity: order.contracts,
-    order_type: 'market',
+    qty: String(order.contracts),
+    type: 'market',
     time_in_force: 'day',
+    position_intent: order.intent,
   }
+  if (order.client_order_id) args.client_order_id = order.client_order_id
+  return args
 }
 
 export async function placeGateOrders(client, gateOrders, optionChain, io = { stderr: process.stderr }) {
@@ -116,7 +120,7 @@ export async function placeGateOrders(client, gateOrders, optionChain, io = { st
       const args = buildPlaceArgs(resolved, order)
       const raw = await client.callTool({ name: PLACE_TOOL, arguments: args })
       results.push({ order, status: 'placed', contract: resolved.symbol, result: decodeMcpResult(raw) })
-      io.stderr.write(`orders: placed ${args.side} ${args.quantity}x ${resolved.symbol}\n`)
+      io.stderr.write(`orders: placed ${args.side} ${args.qty}x ${resolved.symbol}\n`)
     } catch (error) {
       results.push({ order, status: 'failed', reason: error instanceof Error ? error.message : String(error) })
       io.stderr.write(`orders: FAILED to place ${order.structure}: ${error}\n`)

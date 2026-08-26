@@ -85,17 +85,11 @@ def main() -> int:
         print("\ndry run — nothing placed. Re-run with --execute to submit these paper orders.")
         return 0
 
-    from alpaca.trading.enums import OrderSide, TimeInForce
-    from alpaca.trading.requests import MarketOrderRequest
-
     placed = 0
     for sym, _tgt, buy, _px, _d in rows:
-        req = MarketOrderRequest(
-            symbol=sym, qty=int(buy), side=OrderSide.BUY, time_in_force=TimeInForce.DAY
-        )
         try:
-            order = source._trading.submit_order(req)
-            print(f"  placed {sym}: buy {int(buy)} -> order {getattr(order, 'id', '?')} [{getattr(order, 'status', '?')}]")
+            order_id = source.submit_market_order(sym, buy)
+            print(f"  placed {sym}: buy {int(buy)} -> order {order_id}")
             placed += 1
         except Exception as e:
             print(f"  ! order failed for {sym}: {type(e).__name__}: {e}")
