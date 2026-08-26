@@ -56,23 +56,28 @@ def target_coverage(score: float) -> float:
 
 # ---------------------------------------------------------------------------
 # Income posture — the *inverse* dial to the hedge (README §3 profit engine).
-# Sell premium when IV is genuinely rich AND the market is calm; stop selling as
-# the regime turns risk-off (you don't want to be short premium into a crash).
+# Sell premium when it is genuinely overpriced vs. what the market actually delivers
+# (positive variance risk premium), damped to zero as the regime turns risk-off (you
+# don't want to be short premium into a crash).
+#
+# Gated on the VRP (implied − realized vol), NOT IV Rank. IV Rank compares IV to its
+# own past year, which needs a year of history and, from a seeded range, mis-fires at
+# yearly-low IV — declining to sell even when premium is genuinely rich vs. reality.
+# The VRP is the honest, history-free "is premium overpriced right now" signal, and it
+# fires correctly inside a short (~5-day) window where IV-Rank history never accrues.
 # ---------------------------------------------------------------------------
 
-IVR_FLOOR, IVR_CEIL = 20.0, 80.0  # IV Rank band over which selling ramps 0 -> full
-VRP_DISCOUNT = 0.25  # if implied < realized (VRP <= 0) premium isn't truly rich: throttle
+VRP_FLOOR, VRP_CEIL = 0.0, 0.08  # vol-point band over which selling ramps 0 -> full
 
 
-def income_aggressiveness(iv_rank: float, vrp: float, regime: float) -> float:
+def income_aggressiveness(vrp: float, regime: float) -> float:
     """How hard to harvest premium this cycle, 0..1 (§7.7).
 
-    Rises with IV Rank (rich vs its own year), gated by a positive variance risk
-    premium (implied richer than realized), and damped to zero as the regime turns
-    risk-off. This is the mirror image of `target_coverage`: calm+rich -> harvest;
-    stress -> pull in and let the hedge take over.
+    Rises with the variance risk premium (implied richer than realized — premium is
+    overpriced vs. reality, so selling pays) and is damped to zero as the regime turns
+    risk-off. The mirror image of `target_coverage`: rich+calm -> harvest; stress ->
+    stand down and let the hedge take over. Non-positive VRP -> nothing worth selling.
     """
-    richness = clip((iv_rank - IVR_FLOOR) / (IVR_CEIL - IVR_FLOOR), 0.0, 1.0)
-    vrp_factor = 1.0 if vrp > 0.0 else VRP_DISCOUNT
+    richness = clip((vrp - VRP_FLOOR) / (VRP_CEIL - VRP_FLOOR), 0.0, 1.0)
     regime_damp = clip(1.0 - regime, 0.0, 1.0)
-    return clip(richness * vrp_factor * regime_damp, 0.0, 1.0)
+    return clip(richness * regime_damp, 0.0, 1.0)

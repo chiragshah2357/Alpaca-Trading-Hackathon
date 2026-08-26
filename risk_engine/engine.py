@@ -54,7 +54,7 @@ def plan_hedge(
     market: MarketData,
     snapshot: RiskSnapshot,
     current_contracts: int = 0,
-    expiry_days: int = 14,
+    expiry_days: int = 7,
     target_put_delta: float = 0.35,
     strike_pct_otm: float | None = None,
 ) -> HedgePlan:
@@ -171,8 +171,8 @@ def plan_strategy(
     market: MarketData,
     snapshot: RiskSnapshot,
     current_contracts: int = 0,
-    income_dte: int = 7,
-    hedge_dte: int = 14,
+    income_dte: int = 5,
+    hedge_dte: int = 7,
 ) -> StrategyPlan:
     """Combine the income overlay and the hedge overlay into one decision (§3, §7).
 

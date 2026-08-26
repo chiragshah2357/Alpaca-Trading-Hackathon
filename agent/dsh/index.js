@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process'
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { withAlpacaReadonlySnapshot } from './alpaca-readonly.js'
+import { connectAlpacaOrders, placeGateOrders } from './alpaca-orders.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -11,10 +12,28 @@ export const inject = ['tools']
 
 export const Config = Schema.object({
   repositoryRoot: Schema.string().required(),
-  scenario: Schema.string().required(),
+  scenario: Schema.string(),
+  live: Schema.boolean().default(false),
   ledgerPath: Schema.string().required(),
   pythonExecutable: Schema.string().default('python3'),
+  placeOrders: Schema.boolean().default(false), // autonomous paper placement — off unless enabled
 })
+
+async function autoPlace(gate) {
+  const snapshot = await withAlpacaReadonlySnapshot()
+  const connection = await connectAlpacaOrders()
+  try {
+    return await placeGateOrders(connection.client, gate.orders || [], snapshot.spy_option_chain)
+  } finally {
+    await connection.close()
+  }
+}
+
+function modeArgs(config) {
+  if (config.live) return ['--live']
+  if (!config.scenario) throw new Error('portfolio-tools requires either scenario or live=true')
+  return ['--scenario', config.scenario]
+}
 
 const CONTEXT_OUTPUT = {
   type: 'object',
@@ -36,6 +55,7 @@ const SUBMIT_OUTPUT = {
     scenario_id: { type: 'string', required: true },
     decision: { type: 'json', required: true },
     gate: { type: 'json', required: true },
+    placement: { type: 'json' },
   },
 }
 
@@ -102,7 +122,7 @@ export function apply(ctx, config) {
       render: (_args, value) => rendered(value),
     },
     execute() {
-      return bridge(config, ['context', '--scenario', config.scenario])
+      return bridge(config, ['context', ...modeArgs(config)])
     },
   }))
 
@@ -122,14 +142,23 @@ export function apply(ctx, config) {
     async execute(args, exec) {
       const value = await bridge(config, [
         'submit',
-        '--scenario', config.scenario,
+        ...modeArgs(config),
         '--context-id', args.context_id,
         '--candidate-id', args.candidate_id,
         '--reason', args.reason,
         '--decision-id', args.decision_id,
         '--ledger', config.ledgerPath,
       ])
-      if (value.gate?.status === 'approved_for_dry_run') exec.concludeTurn()
+      if (value.gate?.status === 'approved_for_dry_run') {
+        if (config.placeOrders) {
+          try {
+            value.placement = await autoPlace(value.gate)
+          } catch (error) {
+            value.placement = { status: 'error', reason: error instanceof Error ? error.message : String(error) }
+          }
+        }
+        exec.concludeTurn()
+      }
       return value
     },
   }))

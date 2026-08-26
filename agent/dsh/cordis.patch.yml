@@ -100,7 +100,9 @@
       First call get_decision_context. Compare only the returned admissible candidates.
       Then call submit_decision with exactly one returned candidate_id and a concise reason.
       Never invent orders, quantities, prices, risk numbers, or candidates. Exact sizing
-      belongs to the deterministic gate. Every result still requires human approval.
+      and any order placement belong to the deterministic gate and system, not to you.
+      On this paper account, an approved decision may be placed automatically when the
+      operator has enabled placement; you never place orders yourself.
 
 - insert:
     - id: portfolio-tools
@@ -109,8 +111,10 @@
       config:
         repositoryRoot: !!js ctx.portfolioStartup.repositoryRoot
         scenario: !!js ctx.portfolioStartup.scenario
+        live: !!js ctx.portfolioStartup.live
         ledgerPath: !!js ctx.portfolioStartup.ledgerPath
         pythonExecutable: python3
+        placeOrders: !!js ctx.portfolioStartup.placeOrders
 
     - id: portfolio-startup
       name: alpaca-portfolio-dsh/startup
@@ -121,3 +125,14 @@
       config:
         scenario: !!js ctx.portfolioStartup.scenario
         instruction: !!js ctx.portfolioStartup.instruction
+        heartbeat: !!js ctx.portfolioStartup.heartbeat
+
+    - id: portfolio-heartbeat
+      name: alpaca-portfolio-dsh/heartbeat
+      inject: [portfolioStartup]
+      config:
+        scenario: !!js ctx.portfolioStartup.scenario
+        live: !!js ctx.portfolioStartup.live
+        heartbeat: !!js ctx.portfolioStartup.heartbeat
+        instruction: !!js ctx.portfolioStartup.instruction
+        intervalMs: !!js ctx.portfolioStartup.intervalMs

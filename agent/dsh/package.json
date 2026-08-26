@@ -7,12 +7,16 @@
   "exports": {
     ".": "./index.js",
     "./runner": "./runner.js",
+    "./heartbeat": "./heartbeat.js",
     "./startup": "./startup.js"
   },
   "files": [
     "index.js",
     "runner.js",
+    "heartbeat.js",
     "startup.js",
+    "alpaca-orders.js",
+    "alpaca-readonly.js",
     "cordis.patch.yml"
   ],
   "dsh": {
