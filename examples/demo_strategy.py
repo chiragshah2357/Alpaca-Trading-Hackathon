@@ -3,9 +3,13 @@
 Runs one base book through THREE market regimes and prints the unified strategy plan
 (income legs + hedge + net carry) for each. Shows the whole thesis in one screen:
 
-    CALM      cheap IV, quiet market   -> SIT      (nothing to sell, nothing to fear)
-    ELEVATED  rich IV, still risk-on    -> HARVEST  (sell premium — the P&L engine)
-    STRESSED  rich IV, risk-off + drawdown -> DEFEND (income stands down, hedge steps in)
+    CALM      premium rich vs realized -> HARVEST  (positive VRP, calm — sell premium)
+    ELEVATED  richer IV, still risk-on   -> HARVEST  (bigger VRP — the P&L engine scales up)
+    STRESSED  risk-off + drawdown        -> DEFEND   (income stands down, hedge steps in)
+
+    Income now fires on the variance risk premium (implied richer than realized), not an
+    IV-Rank floor — so it harvests whenever premium is genuinely overpriced, and stands
+    down only when the regime turns risk-off.
 
     python examples/demo_strategy.py
 """
@@ -92,12 +96,12 @@ def show(title: str, portfolio: Portfolio, market: MarketData):
 
 def main() -> int:
     _, calm = show(
-        "CALM  (cheap IV, quiet) -> SIT",
+        "CALM  (premium rich vs realized, quiet) -> HARVEST",
         base_book(spy_price=560, qqq_price=480, peak=304_000, cash=40_000),
         CALM,
     )
     _, elevated = show(
-        "ELEVATED  (rich IV, still risk-on) -> HARVEST",
+        "ELEVATED  (richer IV, still risk-on) -> HARVEST",
         base_book(spy_price=555, qqq_price=475, peak=301_500, cash=40_000),
         ELEVATED,
     )
@@ -108,12 +112,13 @@ def main() -> int:
     )
 
     # --- invariants: the adaptive hybrid behavior we claim ---
-    # CALM: cheap IV -> no premium selling; calm -> no hedge. Just sit.
-    assert not calm.income.legs, "calm/cheap IV should sell no premium"
+    # CALM: premium rich vs realized (positive VRP) -> harvest; calm -> no hedge.
+    assert calm.income.legs, "calm-but-rich premium should harvest (positive VRP)"
+    assert calm.income.total_credit > 0, "harvest cycle should collect premium"
     assert calm.hedge.contracts_target == 0, "calm should hold no hedge"
-    assert calm.posture.startswith("SIT"), "calm posture should be SIT"
+    assert "HARVEST" in calm.posture, "calm-rich posture should HARVEST"
 
-    # ELEVATED: rich IV + calm -> harvest premium, positive carry, minimal hedge.
+    # ELEVATED: richer IV + calm -> harvest more premium, positive carry, minimal hedge.
     assert elevated.income.legs, "elevated IV should generate income legs"
     assert elevated.income.total_credit > 0, "harvest cycle should collect premium"
     assert elevated.income.net_theta_per_day > 0, "harvesting should earn positive theta"

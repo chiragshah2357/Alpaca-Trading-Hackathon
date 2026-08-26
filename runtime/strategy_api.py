@@ -28,8 +28,8 @@ def get_strategy_context(
     *,
     index_symbol: str = "SPY",
     day_pnl_pct: float = 0.0,
-    income_dte: int = 7,
-    hedge_dte: int = 14,
+    income_dte: int = 5,
+    hedge_dte: int = 7,
     current_contracts: int = 0,
 ) -> dict:
     """Produce the full, risk-validated decision context for one cycle, as a dict.

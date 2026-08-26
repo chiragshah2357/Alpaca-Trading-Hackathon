@@ -29,7 +29,7 @@ from .metrics import variance_risk_premium
 from .types import MarketData, Portfolio, RiskSnapshot
 
 # --- Tunable knobs (calibrated on the dev account, kept simple for the MVP) ---
-DEFAULT_EXPIRY_DAYS = 7       # weeklies — capture the fast end of time decay in-window
+DEFAULT_EXPIRY_DAYS = 5       # ~1-week expiries that decay AND expire inside a 5-day window
 TARGET_CALL_DELTA = 0.30      # sell ~30-delta calls (OTM, ~70% chance kept)
 TARGET_PUT_DELTA = 0.30       # sell ~30-delta puts
 SPREAD_WIDTH_PCT = 0.03       # each spread's width as a fraction of spot (defined risk)
@@ -165,7 +165,7 @@ def plan_income(
     T = expiry_days / 365.0
 
     vrp = variance_risk_premium(iv, snapshot.annual_vol, use_variance=False)
-    agg = scoring.income_aggressiveness(snapshot.iv_rank, vrp, snapshot.regime_signal)
+    agg = scoring.income_aggressiveness(vrp, snapshot.regime_signal)
     if agg <= 0.0 or T <= 0.0 or iv <= 0.0:
         return _empty_plan(agg)
 

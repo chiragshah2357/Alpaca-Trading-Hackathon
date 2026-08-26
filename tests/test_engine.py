@@ -165,16 +165,18 @@ class TestScoring(unittest.TestCase):
         self.assertTrue(0.0 < mid < 1.0)
 
     def test_income_aggressiveness(self):
-        # risk-off kills selling regardless of IV
-        self.assertEqual(scoring.income_aggressiveness(80, 0.1, regime=1.0), 0.0)
-        # rich IV + calm + positive VRP -> harvest
-        self.assertGreater(scoring.income_aggressiveness(80, 0.1, regime=0.0), 0.0)
-        # cheap IV -> nothing to sell
-        self.assertEqual(scoring.income_aggressiveness(10, 0.1, regime=0.0), 0.0)
-        # negative VRP throttles vs positive VRP at the same IV Rank
-        hi = scoring.income_aggressiveness(60, 0.1, 0.0)
-        lo = scoring.income_aggressiveness(60, -0.1, 0.0)
-        self.assertGreater(hi, lo)
+        # risk-off kills selling regardless of how rich premium is
+        self.assertEqual(scoring.income_aggressiveness(0.1, regime=1.0), 0.0)
+        # positive VRP (premium overpriced vs realized) + calm -> harvest
+        self.assertGreater(scoring.income_aggressiveness(0.1, regime=0.0), 0.0)
+        # non-positive VRP -> nothing worth selling
+        self.assertEqual(scoring.income_aggressiveness(0.0, regime=0.0), 0.0)
+        self.assertEqual(scoring.income_aggressiveness(-0.05, regime=0.0), 0.0)
+        # richer premium -> more aggressive
+        self.assertGreater(
+            scoring.income_aggressiveness(0.06, 0.0),
+            scoring.income_aggressiveness(0.02, 0.0),
+        )
 
 
 class TestPayoffs(unittest.TestCase):
@@ -227,13 +229,16 @@ class TestEngine(unittest.TestCase):
         elev = plan_strategy(elev_b, ELEVATED, assess(elev_b, ELEVATED))
         strs = plan_strategy(strs_b, STRESSED, assess(strs_b, STRESSED))
 
-        self.assertFalse(calm.income.legs)              # nothing to sell
+        # calm but premium is rich vs realized -> harvest, and no hedge (low risk)
+        self.assertTrue(calm.income.legs)
         self.assertEqual(calm.hedge.contracts_target, 0)
 
         self.assertTrue(elev.income.legs)               # harvest
         self.assertGreater(elev.income.total_credit, 0)
         self.assertGreater(elev.income.net_theta_per_day, 0)  # positive carry from decay
         self.assertGreater(elev.income.total_credit, strs.income.total_credit)
+        # richer IV -> more premium collected than the calm cycle
+        self.assertGreater(elev.income.total_credit, calm.income.total_credit)
 
         self.assertGreater(strs.hedge.contracts_target, elev.hedge.contracts_target)
 

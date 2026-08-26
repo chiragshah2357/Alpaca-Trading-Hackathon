@@ -90,7 +90,7 @@ def build_decision_context(
     *,
     scenario_id: str = "live",
     current_contracts: int = 0,
-    expiry_days: int = 30,
+    expiry_days: int = 5,
 ) -> DecisionContext:
     """Create only choices that pass the coarse deterministic risk envelope.
 
