@@ -75,9 +75,14 @@ class AlpacaDataSource:
             out.append((p.symbol, float(p.qty), price))
         return out
 
-    # --- order placement (paper) -------------------------------------------
-    def submit_market_order(self, symbol: str, qty: float) -> str:
-        """Submit a day market buy order on the paper account; returns the order id.
+    # --- order placement (one-off seeding) ---------------------------------
+    def submit_market_order(self, symbol: str, qty: int | float) -> str:
+        """Submit a day market buy order on the configured Alpaca account; returns the order id.
+
+        The account mode (paper vs live) follows how this `AlpacaDataSource` was
+        constructed — `ALPACA_PAPER` defaults to true (paper). Seeding the core book is
+        intended for the paper account; callers placing on a live-constructed source
+        do so deliberately.
 
         Kept on the concrete `AlpacaDataSource` (not the read-only `DataSource`
         protocol) because OBSERVE never places orders — this is for one-off seeding
