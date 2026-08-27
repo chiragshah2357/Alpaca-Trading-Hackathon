@@ -32,6 +32,12 @@ class DecisionPipelineTests(unittest.TestCase):
             ["partial_hedge", "full_hedge"],
         )
 
+    def test_income_open_suppresses_harvest(self):
+        # an overlay already on -> no fresh harvest_income choice (a loop must not stack)
+        portfolio, market = get_scenario("calm")
+        ctx = build_decision_context(portfolio, market, scenario_id="calm", income_open=True)
+        self.assertEqual([c.candidate_id for c in ctx.candidates], ["hold"])
+
     def test_model_view_has_tradeoffs_but_not_exact_order_sizes(self):
         visible = context("stressed").to_model_dict()
         encoded = json.dumps(visible)

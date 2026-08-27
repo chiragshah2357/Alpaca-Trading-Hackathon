@@ -120,6 +120,19 @@ class StateStore:
 # ---------------------------------------------------------------------------
 
 
+def is_option_symbol(symbol: str) -> bool:
+    """True for an OCC option symbol (ROOT + YYMMDD + C/P + strike*1000, 8 digits).
+
+    Alpaca's positions list mixes equities and the option legs we hold; the risk engine's
+    book is equities only, so option symbols must be excluded from `assemble_portfolio`
+    (they'd otherwise be counted as stock with wrong magnitude and beta 1.0).
+    """
+    s = str(symbol).strip()
+    if len(s) < 15 or s[-9] not in ("C", "P"):
+        return False
+    return s[-8:].isdigit() and s[-15:-9].isdigit()
+
+
 def moving_average(closes: list[float], window: int) -> float:
     """Simple moving average of the last `window` closes (uses all if fewer exist)."""
     if not closes:
@@ -157,7 +170,7 @@ def assemble_portfolio(
     positions = [
         Position(sym, shares=shares, price=price, beta=betas.get(sym, 1.0))
         for sym, shares, price in raw_positions
-        if shares != 0.0 and price > 0.0
+        if shares != 0.0 and price > 0.0 and not is_option_symbol(sym)
     ]
     return Portfolio(positions=positions, cash=cash, peak_equity=peak_equity)
 

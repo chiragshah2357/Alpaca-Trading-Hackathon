@@ -53,8 +53,9 @@ MCP child environment only; the connection is hard-wired to paper mode.
 - `GateResult`: approval/rejection reasons and exact paper-dry-run orders. Every
   approved result still requires human approval before any future submission. **Opt-in
   exception:** when the operator starts the bundle with `--place`, the system (never
-  the model) may auto-place an approved single-leg protective put on the **paper**
-  account. Without `--place`, nothing is ever sent to Alpaca.
+  the model) may auto-place an approved options overlay on the **paper** account — the
+  single-leg hedge/covered call as plain option orders, the iron condor as a 4-leg
+  `mleg` order, fail-closed per leg. Without `--place`, nothing is ever sent to Alpaca.
 
 ## Explicit non-goals
 

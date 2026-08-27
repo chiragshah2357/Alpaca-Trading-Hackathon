@@ -15,12 +15,12 @@ The model cannot invent symbols, orders, quantities, or risk values. A successfu
 **never sent to Alpaca** — it is recorded as a paper dry run only.
 
 **Autonomous placement (opt-in).** When the operator starts the bundle with `--place`,
-an approved decision's *single-leg protective put* may be auto-placed on the **paper**
-account by the system after the gate approves it. The model never places an order
-itself — placement is done server-side by `agent/dsh/alpaca-orders.js`, which resolves
-the hedge to a real listed OCC contract and fails closed if it cannot. Multi-leg income
-structures are logged as skipped until multi-leg placement lands. Without `--place`,
-nothing is ever sent to Alpaca.
+an approved decision's options overlay may be auto-placed on the **paper** account by
+the system after the gate approves it. The model never places an order itself —
+placement is done server-side by `agent/dsh/alpaca-orders.js`, which resolves each leg
+to a real listed OCC contract and fails closed if any leg cannot. The single-leg
+protective put and covered call go as plain option orders; the iron condor goes as a
+4-leg `mleg` order. Without `--place`, nothing is ever sent to Alpaca.
 
 ## Setup
 
