@@ -14,6 +14,11 @@ The model cannot invent symbols, orders, quantities, or risk values. A successfu
 `submit_decision` result still has `human_approval_required: true`. By default it is
 **never sent to Alpaca** — it is recorded as a paper dry run only.
 
+The bundle discovers its focused DSH-native skills from `.agents/skills/`:
+`paper-risk-gate`, `alpaca-mcp-observe`, and `decision-idempotency`. They document
+the model-visible decision contract and the direct official MCP observation surface;
+they never grant an order or account-mutation capability.
+
 **Autonomous placement (opt-in).** When the operator starts the bundle with `--place`,
 an approved decision's options overlay may be auto-placed on the **paper** account by
 the system after the gate approves it. The model never places an order itself —

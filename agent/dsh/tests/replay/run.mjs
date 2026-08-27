@@ -27,7 +27,7 @@ run(['plugin', '--profile', 'portfolio-agent', 'add', '@deepseek-ai/dsh-llm-repl
 const selections = {
   calm: 'hold',
   elevated: 'harvest_income',
-  stressed: 'cost_capped_hedge',
+  stressed: 'full_hedge',
 }
 
 for (const [scenario, candidateId] of Object.entries(selections)) {

@@ -4,10 +4,12 @@ import test from 'node:test'
 import {
   ALPACA_MCP_VERSION,
   READONLY_TOOLS,
+  assertReadonlyTool,
   connectAlpacaMcp,
   decodeMcpResult,
   fetchAlpacaReadonlySnapshot,
   sanitizeExternalData,
+  withAlpacaReadonlyTool,
 } from '../alpaca-readonly.js'
 
 class FakeClient {
@@ -68,4 +70,8 @@ test('official MCP wrapper calls only the five read-only tools', async () => {
   assert.ok(client.calls.every(call => !call.name.includes('close')))
   assert.equal(client.calls.find(call => call.name === 'get_stock_bars').args.feed, 'iex')
   assert.equal(client.calls.find(call => call.name === 'get_option_chain').args.feed, 'indicative')
+})
+
+test('transparent tool boundary rejects order names before any MCP call', () => {
+  assert.throws(() => assertReadonlyTool('place_option_order'), /refusing non-read-only MCP tool/)
 })

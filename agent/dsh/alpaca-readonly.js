@@ -102,6 +102,28 @@ async function checkedCall(client, available, name, args) {
   ))
 }
 
+export function assertReadonlyTool(name) {
+  if (!READONLY_TOOLS.includes(name)) throw new Error(`refusing non-read-only MCP tool: ${name}`)
+}
+
+/**
+ * Invoke one official Alpaca MCP read tool without exposing any mutation tool.
+ * This is intentionally exported for the DSH profile's transparent MCP tools:
+ * the model sees the official data operation, while this boundary still enforces
+ * paper credentials, a fixed allowlist, bounded output, and identifier redaction.
+ */
+export async function withAlpacaReadonlyTool(name, args, env = process.env) {
+  assertReadonlyTool(name)
+  const connection = await connectAlpacaMcp(env)
+  try {
+    const listed = await connection.client.listTools()
+    const available = new Set(listed.tools.map(tool => tool.name))
+    return await checkedCall(connection.client, available, name, args)
+  } finally {
+    await connection.close()
+  }
+}
+
 export async function fetchAlpacaReadonlySnapshot(client) {
   const listed = await client.listTools()
   const available = new Set(listed.tools.map(tool => tool.name))
