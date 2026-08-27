@@ -125,6 +125,8 @@ export function buildPlaceArgs(resolved, order) {
     type: 'market',
     time_in_force: 'day',
     position_intent: order.intent,
+    // Broker-level idempotency: a retry with the same id is rejected, not duplicated.
+    ...(order.client_order_id ? { client_order_id: order.client_order_id } : {}),
   }
 }
 
@@ -134,6 +136,7 @@ export function buildMlegArgs(order, resolvedLegs) {
     qty: String(order.contracts),
     type: 'market',
     time_in_force: 'day',
+    ...(order.client_order_id ? { client_order_id: order.client_order_id } : {}),
     legs: resolvedLegs.map((leg) => ({
       symbol: leg.symbol,
       ratio_qty: '1',

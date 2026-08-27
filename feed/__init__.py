@@ -16,6 +16,7 @@ from .core import (
     assemble_market_data,
     assemble_portfolio,
     compute_beta,
+    is_option_symbol,
     moving_average,
     observe,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "assemble_portfolio",
     "assemble_market_data",
     "compute_beta",
+    "is_option_symbol",
     "moving_average",
     "MockDataSource",
     "AlpacaDataSource",

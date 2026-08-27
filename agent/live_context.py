@@ -54,6 +54,21 @@ def count_hedge_contracts(positions, index_symbol: str = "SPY") -> int:
     return held
 
 
+def has_open_income(positions) -> bool:
+    """True if any short option leg is already held (an income overlay is on).
+
+    Selling premium means short option legs (negative qty); a live condor/covered call
+    leaves them on the book. A periodic loop must see this or it would sell a fresh
+    overlay every tick and stack far past the risk caps in aggregate.
+    """
+    from feed import is_option_symbol
+
+    return any(
+        shares is not None and shares < 0 and is_option_symbol(symbol)
+        for symbol, shares, _price in positions
+    )
+
+
 # ---------------------------------------------------------------------------
 # Source selection — mirror scripts/run_agent.py so creds are read one way.
 # ---------------------------------------------------------------------------
@@ -132,6 +147,7 @@ def save_context_inputs(
     *,
     expiry_days: int,
     current_contracts: int,
+    income_open: bool = False,
     keep: int = DEFAULT_STORE_KEEP,
 ) -> None:
     """Append the inputs that produced `context_id`; keep only the last `keep`."""
@@ -146,6 +162,7 @@ def save_context_inputs(
         "market": _market_to_dict(market),
         "expiry_days": expiry_days,
         "current_contracts": current_contracts,
+        "income_open": income_open,
     })
     rows = rows[-keep:]
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,20 +209,24 @@ def build_live_context(
 
     if source is None or state is None:
         source, state = _source_and_state()
+    live_positions = source.positions()
     if current_contracts is None:
-        current_contracts = count_hedge_contracts(source.positions(), index_symbol)
+        current_contracts = count_hedge_contracts(live_positions, index_symbol)
+    income_open = has_open_income(live_positions)
     portfolio, market = observe(source, state, index_symbol=index_symbol)
     context = build_decision_context(
         portfolio,
         market,
         scenario_id=LIVE_SCENARIO_ID,
         current_contracts=current_contracts,
+        income_open=income_open,
         expiry_days=expiry_days,
     )
     if persist:
         save_context_inputs(
             context.context_id, portfolio, market,
             expiry_days=expiry_days, current_contracts=current_contracts,
+            income_open=income_open,
         )
     return context
 
@@ -220,5 +241,6 @@ def rebuild_live_context(context_id: str) -> DecisionContext | None:
         _market_from_dict(row["market"]),
         scenario_id=LIVE_SCENARIO_ID,
         current_contracts=row["current_contracts"],
+        income_open=row.get("income_open", False),
         expiry_days=row["expiry_days"],
     )

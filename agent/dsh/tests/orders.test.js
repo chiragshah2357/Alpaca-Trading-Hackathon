@@ -45,18 +45,20 @@ test('placeGateOrders places the single-leg hedge and the 4-leg iron condor', as
   }
   const io = { stderr: { write() {} } }
   const results = await placeGateOrders(client, [
-    { structure: 'protective_put', symbol: 'SPY', strike: 520, expiry_days: 5, contracts: 2, intent: 'buy_to_open' },
+    { structure: 'protective_put', symbol: 'SPY', strike: 520, expiry_days: 5, contracts: 2, intent: 'buy_to_open', client_order_id: 'hedge-1' },
     {
-      structure: 'iron_condor', symbol: 'SPY', contracts: 1, expiry_days: 5, intent: 'sell_to_open',
+      structure: 'iron_condor', symbol: 'SPY', contracts: 1, expiry_days: 5, intent: 'sell_to_open', client_order_id: 'condor-1',
       short_strike: 520, long_strike: 510, call_short_strike: 580, call_long_strike: 590,
     },
   ], chain, io)
   assert.equal(results[0].status, 'placed')
   assert.equal(results[1].status, 'placed')
   assert.equal(calls.length, 2)
-  // hedge = single-leg
+  // hedge = single-leg, with its client_order_id threaded through for broker idempotency
   assert.equal(calls[0].arguments.side, 'buy')
   assert.equal(calls[0].arguments.order_class, undefined)
+  assert.equal(calls[0].arguments.client_order_id, 'hedge-1')
+  assert.equal(calls[1].arguments.client_order_id, 'condor-1')
   // condor = 4-leg mleg (2 sells, 2 buys)
   assert.equal(calls[1].arguments.order_class, 'mleg')
   assert.equal(calls[1].arguments.qty, '1')

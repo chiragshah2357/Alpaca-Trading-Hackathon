@@ -90,6 +90,7 @@ def build_decision_context(
     *,
     scenario_id: str = "live",
     current_contracts: int = 0,
+    income_open: bool = False,
     expiry_days: int = 5,
 ) -> DecisionContext:
     """Create only choices that pass the coarse deterministic risk envelope.
@@ -97,6 +98,9 @@ def build_decision_context(
     Calm/elevated regimes expose hold and, when genuinely available, income.
     Medium/high-risk regimes expose partial/full protection. A high-risk context
     deliberately does not expose an unhedged hold or short-premium choice.
+
+    `income_open` (an overlay already on from a prior cycle) suppresses the
+    harvest_income choice, so a periodic loop never stacks a fresh condor every tick.
     """
     snapshot = assess(portfolio, market)
     candidates: list[DecisionCandidate] = []
@@ -121,7 +125,7 @@ def build_decision_context(
             market,
         ))
 
-    if snapshot.risk_score < 40.0:
+    if snapshot.risk_score < 40.0 and not income_open:
         income = plan_income(portfolio, market, snapshot, expiry_days=expiry_days)
         if income.legs:
             income_snapshot = replace(snapshot, target_coverage=0.0)

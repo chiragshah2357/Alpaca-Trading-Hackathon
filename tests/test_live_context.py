@@ -63,6 +63,18 @@ class LiveContextTest(unittest.TestCase):
 
         self.assertIsNone(rebuild_live_context("does-not-exist"))
 
+    def test_option_positions_excluded_and_income_detected(self) -> None:
+        from feed.core import assemble_portfolio, is_option_symbol
+        from agent.live_context import has_open_income
+
+        raw = [("SPY", 100, 560.0), ("SPY240920P00520000", -2, 4.0), ("AAPL", 50, 300.0)]
+        pf = assemble_portfolio(raw, cash=1000.0, peak_equity=1000.0)
+        self.assertEqual([p.symbol for p in pf.positions], ["SPY", "AAPL"])  # option leg dropped
+        self.assertTrue(is_option_symbol("SPY240920P00520000"))
+        self.assertFalse(is_option_symbol("SPY"))
+        self.assertTrue(has_open_income(raw))                          # short option leg present
+        self.assertFalse(has_open_income([("SPY", 100, 560.0)]))       # equity only
+
     def test_count_hedge_contracts(self) -> None:
         from agent.live_context import count_hedge_contracts
 
