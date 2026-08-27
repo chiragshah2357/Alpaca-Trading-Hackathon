@@ -35,6 +35,14 @@ test('buildPlaceArgs maps intent to side and carries contract count', () => {
   assert.equal(args.symbol, 'SPY240920P00520000')
 })
 
+test('buildPlaceArgs omits client_order_id when absent', () => {
+  const args = buildPlaceArgs({ symbol: 'SPY240920P00520000' }, { intent: 'sell_to_close', contracts: 2 })
+  assert.equal(args.side, 'sell')
+  assert.equal(args.qty, '2')
+  assert.equal(args.position_intent, 'sell_to_close')
+  assert.equal(args.client_order_id, undefined)
+})
+
 test('placeGateOrders places the single-leg hedge and the 4-leg iron condor', async () => {
   const calls = []
   const client = { async callTool(req) { calls.push(req); return { structuredContent: { ok: true } } } }

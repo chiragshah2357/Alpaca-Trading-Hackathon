@@ -11,8 +11,16 @@ The model can access exactly three tools:
   mutation tools are not exposed.
 
 The model cannot invent symbols, orders, quantities, or risk values. A successful
-`submit_decision` result still has `human_approval_required: true` and is never sent
-to Alpaca.
+`submit_decision` result still has `human_approval_required: true`. By default it is
+**never sent to Alpaca** — it is recorded as a paper dry run only.
+
+**Autonomous placement (opt-in).** When the operator starts the bundle with `--place`,
+an approved decision's options overlay may be auto-placed on the **paper** account by
+the system after the gate approves it. The model never places an order itself —
+placement is done server-side by `agent/dsh/alpaca-orders.js`, which resolves each leg
+to a real listed OCC contract and fails closed if any leg cannot. The single-leg
+protective put and covered call go as plain option orders; the iron condor goes as a
+4-leg `mleg` order. Without `--place`, nothing is ever sent to Alpaca.
 
 ## Setup
 
@@ -45,6 +53,26 @@ python3 -m unittest discover -s tests -v
 connect to a real account, remote model, or paper-order endpoint.
 `test:alpaca-schema` starts the official server with non-secret placeholders and
 calls only `tools/list`; it does not invoke an Alpaca API tool.
+
+## Heartbeat runtime (market-monitoring loop)
+
+`agent/dsh/heartbeat.js` is a DSH-native long-lived loop that wakes on an interval
+during US market hours, runs one decide cycle per tick, and can place approved paper
+orders autonomously (when `--place` is set). It replaces the retired GitHub Actions
+cron as the scheduling owner:
+
+```bash
+cd agent/dsh
+DSH_HOME="$PWD/../../.dsh" ./node_modules/.bin/dsh \
+  plugin --profile portfolio-agent add "$PWD"
+dsh --profile portfolio-agent --live --heartbeat --interval 1800000 --place \
+  "protect the book; step the hedge in only if risk justifies it"
+```
+
+- `--live` observes the real paper account (instead of a fixture scenario).
+- `--heartbeat` loops; omit it for a one-shot run.
+- `--interval <ms>` sets the cadence (default 30 min, matching the retired cron).
+- `--place` enables autonomous paper placement of approved single-leg hedges.
 
 ## Alpaca paper read-only boundary
 

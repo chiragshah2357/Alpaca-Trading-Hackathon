@@ -13,6 +13,7 @@ engine or the OBSERVE logic.
 """
 from __future__ import annotations
 
+import math
 import os
 from datetime import date, datetime, timedelta
 
@@ -57,6 +58,7 @@ class AlpacaDataSource:
             )
         if paper is None:
             paper = os.getenv("ALPACA_PAPER", "true").lower() != "false"
+        self._paper = paper
 
         self._trading = TradingClient(api_key, secret_key, paper=paper)
         self._stocks = StockHistoricalDataClient(api_key, secret_key)
@@ -73,6 +75,49 @@ class AlpacaDataSource:
             price = float(p.current_price) if p.current_price is not None else 0.0
             out.append((p.symbol, float(p.qty), price))
         return out
+
+    # --- order placement (one-off seeding) ---------------------------------
+    def submit_market_order(self, symbol: str, qty: int | float) -> str:
+        """Submit a day market buy order on the configured Alpaca account; returns the order id.
+
+        The account mode (paper vs live) follows how this `AlpacaDataSource` was
+        constructed — `ALPACA_PAPER` defaults to true (paper). This write path is
+        **paper-only**: it raises if the source is live-constructed (fail-closed), so
+        seeding can never place a live order.
+
+        Kept on the concrete `AlpacaDataSource` (not the read-only `DataSource`
+        protocol) because OBSERVE never places orders — this is for one-off seeding
+        scripts (scripts/seed_book.py), not the agent loop.
+
+        `qty` must be a positive whole number of shares/contracts. Float sizing math
+        (e.g. seed_book's target - held) can land a hair off an integer (49.999999);
+        we round to the nearest whole share and raise if it is genuinely fractional,
+        so seeding never silently under-buys.
+
+        Fail-closed: this write path refuses to run against a live-constructed source
+        (`ALPACA_PAPER=false`). Seeding is paper-only by design (no live trading).
+        """
+        if not self._paper:
+            raise RuntimeError(
+                "submit_market_order is paper-only (fail-closed); refusing to place on a "
+                "live-constructed AlpacaDataSource (set ALPACA_PAPER=true)."
+            )
+        if not isinstance(qty, (int, float)) or isinstance(qty, bool):
+            raise TypeError(f"qty must be a number, got {type(qty).__name__}")
+        whole = round(qty)
+        if not math.isclose(qty, whole, rel_tol=0.0, abs_tol=1e-6):
+            raise ValueError(f"qty must be a whole number of shares/contracts, got {qty}")
+        if whole <= 0:
+            raise ValueError(f"qty must be positive, got {qty}")
+
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        from alpaca.trading.requests import MarketOrderRequest
+
+        req = MarketOrderRequest(
+            symbol=symbol, qty=whole, side=OrderSide.BUY, time_in_force=TimeInForce.DAY
+        )
+        order = self._trading.submit_order(req)
+        return getattr(order, "id", "?")
 
     # --- prices / bars -----------------------------------------------------
     def daily_closes(self, symbol: str, lookback: int) -> list[float]:
