@@ -7,6 +7,13 @@ import { connectAlpacaOrders, placeGateOrders, fetchOptionChain } from './alpaca
 
 const execFileAsync = promisify(execFile)
 
+// Windows ships `python`, not `python3`. Honor an explicit non-default override, else
+// pick the right launcher for the platform so the bridge spawns on Windows too.
+export function resolvePython(configured) {
+  if (configured && configured !== 'python3') return configured
+  return process.platform === 'win32' ? 'python' : 'python3'
+}
+
 export const name = 'portfolio-tools'
 export const inject = ['tools']
 
@@ -81,7 +88,7 @@ const ALPACA_READONLY_OUTPUT = {
 
 async function bridge(config, args) {
   try {
-    const { stdout } = await execFileAsync(config.pythonExecutable, ['-m', 'agent.cli', ...args], {
+    const { stdout } = await execFileAsync(resolvePython(config.pythonExecutable), ['-m', 'agent.cli', ...args], {
       cwd: config.repositoryRoot,
       encoding: 'utf8',
       maxBuffer: 1024 * 1024,
