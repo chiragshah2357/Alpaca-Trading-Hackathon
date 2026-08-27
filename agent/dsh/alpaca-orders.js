@@ -114,29 +114,31 @@ export function legSpecs(order) {
   throw new Error(`unsupported structure: ${order.structure}`)
 }
 
-// NOTE: place_option_order's exact parameter names (and the mleg leg shape) are the ONE
-// thing to confirm against the live server on first run (schema not available offline).
-// Isolated here so it's a single obvious edit. Market order, day TIF, paper-enforced by env.
+// Shapes verified against alpaca-mcp-server 2.2.1's place_option_order schema
+// (qty/ratio_qty are strings; single-leg uses side; multi-leg uses per-leg side +
+// position_intent). Market order, day TIF, paper-enforced by the child env above.
 export function buildPlaceArgs(resolved, order) {
   return {
     symbol: resolved.symbol,
     side: sideFor(order.intent),
-    quantity: order.contracts,
-    order_type: 'market',
+    qty: String(order.contracts),
+    type: 'market',
     time_in_force: 'day',
+    position_intent: order.intent,
   }
 }
 
 export function buildMlegArgs(order, resolvedLegs) {
   return {
     order_class: 'mleg',
-    quantity: order.contracts,
-    order_type: 'market',
+    qty: String(order.contracts),
+    type: 'market',
     time_in_force: 'day',
     legs: resolvedLegs.map((leg) => ({
       symbol: leg.symbol,
-      side: leg.action === 'sell' ? 'sell_to_open' : 'buy_to_open',
-      ratio_qty: 1,
+      ratio_qty: '1',
+      side: leg.action, // "buy" | "sell"
+      position_intent: leg.action === 'sell' ? 'sell_to_open' : 'buy_to_open',
     })),
   }
 }

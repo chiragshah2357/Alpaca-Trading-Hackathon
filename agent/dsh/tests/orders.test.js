@@ -24,13 +24,14 @@ test('resolveHedgeContract picks nearest expiry then nearest strike', () => {
 test('resolveHedgeContract throws when nothing resolves', () => {
   assert.throws(() => resolveHedgeContract(
     { symbol: 'SPY', strike: 500, expiry_days: 14 }, {}, NOW,
-  ), /no listed put resolves/)
+  ), /no listed P resolves/)
 })
 
 test('buildPlaceArgs maps intent to side and carries contract count', () => {
   const args = buildPlaceArgs({ symbol: 'SPY240920P00520000' }, { intent: 'buy_to_open', contracts: 3 })
   assert.equal(args.side, 'buy')
-  assert.equal(args.quantity, 3)
+  assert.equal(args.qty, '3')
+  assert.equal(args.type, 'market')
   assert.equal(args.symbol, 'SPY240920P00520000')
 })
 
@@ -58,9 +59,11 @@ test('placeGateOrders places the single-leg hedge and the 4-leg iron condor', as
   assert.equal(calls[0].arguments.order_class, undefined)
   // condor = 4-leg mleg (2 sells, 2 buys)
   assert.equal(calls[1].arguments.order_class, 'mleg')
+  assert.equal(calls[1].arguments.qty, '1')
   assert.equal(calls[1].arguments.legs.length, 4)
-  assert.equal(calls[1].arguments.legs.filter((l) => l.side === 'sell_to_open').length, 2)
-  assert.equal(calls[1].arguments.legs.filter((l) => l.side === 'buy_to_open').length, 2)
+  assert.equal(calls[1].arguments.legs.filter((l) => l.position_intent === 'sell_to_open').length, 2)
+  assert.equal(calls[1].arguments.legs.filter((l) => l.position_intent === 'buy_to_open').length, 2)
+  assert.ok(calls[1].arguments.legs.every((l) => l.ratio_qty === '1' && (l.side === 'buy' || l.side === 'sell')))
 })
 
 test('placeGateOrders fails closed when a condor leg cannot resolve', async () => {
