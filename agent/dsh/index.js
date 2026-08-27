@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process'
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { withAlpacaReadonlySnapshot } from './alpaca-readonly.js'
-import { connectAlpacaOrders, placeGateOrders } from './alpaca-orders.js'
+import { connectAlpacaOrders, placeGateOrders, fetchOptionChain } from './alpaca-orders.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -20,10 +20,15 @@ export const Config = Schema.object({
 })
 
 async function autoPlace(gate) {
-  const snapshot = await withAlpacaReadonlySnapshot()
   const connection = await connectAlpacaOrders()
   try {
-    return await placeGateOrders(connection.client, gate.orders || [], snapshot.spy_option_chain)
+    // Fetch both sides so condor call legs resolve, not just the puts the hedge needs.
+    const [puts, calls] = await Promise.all([
+      fetchOptionChain(connection.client, 'put'),
+      fetchOptionChain(connection.client, 'call'),
+    ])
+    const chain = { ...puts, ...calls }
+    return await placeGateOrders(connection.client, gate.orders || [], chain)
   } finally {
     await connection.close()
   }

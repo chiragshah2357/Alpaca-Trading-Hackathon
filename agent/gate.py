@@ -16,7 +16,7 @@ def _order_id(context_id: str, candidate_id: str, suffix: str) -> str:
 def _orders(context: DecisionContext, candidate) -> tuple[dict, ...]:
     orders: list[dict] = []
     for index, leg in enumerate(candidate.plan.income.legs):
-        orders.append({
+        order = {
             "client_order_id": _order_id(context.context_id, candidate.candidate_id, f"income-{index}"),
             "mode": "paper_dry_run",
             "intent": "sell_to_open",
@@ -26,7 +26,13 @@ def _orders(context: DecisionContext, candidate) -> tuple[dict, ...]:
             "expiry_days": leg.expiry_days,
             "short_strike": leg.short_strike,
             "long_strike": leg.long_strike,
-        })
+        }
+        # An iron condor is 4 legs: describe the CALL side too, or the placer can only
+        # see the put spread and would submit an incomplete structure.
+        if leg.kind == "iron_condor":
+            order["call_short_strike"] = leg.call_short_strike
+            order["call_long_strike"] = leg.call_long_strike
+        orders.append(order)
 
     hedge = candidate.plan.hedge
     if hedge.contracts_delta != 0:

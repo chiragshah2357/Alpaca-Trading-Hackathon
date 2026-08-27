@@ -7,10 +7,10 @@ import { ALPACA_MCP_VERSION, decodeMcpResult } from './alpaca-readonly.js'
 const ORDER_TOOLSET = 'account,trading,options-data'
 const PLACE_TOOL = 'place_option_order'
 
-// Structures we can resolve to a concrete listed contract today. Multi-leg income
-// (iron_condor / spreads) needs multi-leg order support + per-leg OCC resolution and is
-// intentionally NOT auto-placed yet — the loop logs it as skipped rather than mis-trade.
-const PLACEABLE_STRUCTURES = new Set(['protective_put'])
+// Structures we can resolve to concrete listed contracts and place. Single-leg
+// (protective_put buy, covered_call sell) go as a plain option order; the iron_condor
+// goes as a 4-leg mleg order. Anything else is skipped rather than mis-traded.
+const PLACEABLE_STRUCTURES = new Set(['protective_put', 'covered_call', 'iron_condor'])
 
 function orderChildEnv(env) {
   const key = env.ALPACA_API_KEY
@@ -59,17 +59,14 @@ function parseOccExpiry(occ) {
   return new Date(Date.UTC(2000 + Number(ymd.slice(0, 2)), Number(ymd.slice(2, 4)) - 1, Number(ymd.slice(4, 6))))
 }
 
-// Resolve a hedge order (underlying + strike + expiry_days) to a real listed contract by
-// scanning the readonly option-chain snapshot for the nearest expiry, then nearest strike.
+// Resolve one leg (right P/C + target strike + target DTE) to a real listed contract by
+// scanning the option-chain snapshot for the nearest expiry, then the nearest strike.
 // Returns { symbol, strike, expiry } or throws — we never place an unresolved contract.
-export function resolveHedgeContract(order, optionChain, now = new Date()) {
-  const targetDays = order.expiry_days
-  const targetStrike = order.strike
-  const entries = Object.keys(optionChain || {})
+export function resolveContract(chain, right, targetStrike, targetDays, now = new Date()) {
   let best = null
-  for (const occ of entries) {
+  for (const occ of Object.keys(chain || {})) {
     if (occ.length < 15) continue
-    if (occ[occ.length - 9] !== 'P') continue
+    if (occ[occ.length - 9] !== right) continue
     let expiry
     try { expiry = parseOccExpiry(occ) } catch { continue }
     const days = Math.round((expiry - now) / 86_400_000)
@@ -80,8 +77,13 @@ export function resolveHedgeContract(order, optionChain, now = new Date()) {
       best = { symbol: occ, strike, expiry, score }
     }
   }
-  if (best === null) throw new Error(`no listed put resolves ${order.symbol} ~${targetStrike} @ ${targetDays}d`)
+  if (best === null) throw new Error(`no listed ${right} resolves ~${targetStrike} @ ${targetDays}d`)
   return { symbol: best.symbol, strike: best.strike, expiry: best.expiry }
+}
+
+// Back-compat single-put helper (the hedge path + its test rely on this exact shape).
+export function resolveHedgeContract(order, optionChain, now = new Date()) {
+  return resolveContract(optionChain, 'P', order.strike, order.expiry_days, now)
 }
 
 function sideFor(intent) {
@@ -90,9 +92,31 @@ function sideFor(intent) {
   throw new Error(`unknown order intent: ${intent}`)
 }
 
-// NOTE: the exact place_option_order parameter names are the ONE thing to confirm against
-// the live server on first run (schema not available offline). Isolated here so it's a
-// single obvious edit. Single-leg, market order, day TIF, paper-enforced by the env above.
+// The abstract legs of each structure: {right, strike, action} — action is open-side
+// (buy = long/debit leg, sell = short/credit leg). This is where "how we decide the
+// options" is made concrete: the engine picked the deltas/strikes; here they become the
+// exact P/C legs to send.
+export function legSpecs(order) {
+  if (order.structure === 'protective_put') {
+    return [{ right: 'P', strike: order.strike, action: sideFor(order.intent) }]
+  }
+  if (order.structure === 'covered_call') {
+    return [{ right: 'C', strike: order.short_strike, action: 'sell' }]
+  }
+  if (order.structure === 'iron_condor') {
+    return [
+      { right: 'P', strike: order.short_strike, action: 'sell' },      // short put  (credit)
+      { right: 'P', strike: order.long_strike, action: 'buy' },        // long put   (protection)
+      { right: 'C', strike: order.call_short_strike, action: 'sell' }, // short call (credit)
+      { right: 'C', strike: order.call_long_strike, action: 'buy' },   // long call  (protection)
+    ]
+  }
+  throw new Error(`unsupported structure: ${order.structure}`)
+}
+
+// NOTE: place_option_order's exact parameter names (and the mleg leg shape) are the ONE
+// thing to confirm against the live server on first run (schema not available offline).
+// Isolated here so it's a single obvious edit. Market order, day TIF, paper-enforced by env.
 export function buildPlaceArgs(resolved, order) {
   return {
     symbol: resolved.symbol,
@@ -103,20 +127,51 @@ export function buildPlaceArgs(resolved, order) {
   }
 }
 
+export function buildMlegArgs(order, resolvedLegs) {
+  return {
+    order_class: 'mleg',
+    quantity: order.contracts,
+    order_type: 'market',
+    time_in_force: 'day',
+    legs: resolvedLegs.map((leg) => ({
+      symbol: leg.symbol,
+      side: leg.action === 'sell' ? 'sell_to_open' : 'buy_to_open',
+      ratio_qty: 1,
+    })),
+  }
+}
+
+// Fetch a fresh P or C chain for SPY through the order client (has options-data). Placement
+// resolves its own contracts (both rights) rather than the read-only snapshot's puts-only view.
+export async function fetchOptionChain(client, type) {
+  const raw = await client.callTool({
+    name: 'get_option_chain',
+    arguments: { underlying_symbol: 'SPY', feed: 'indicative', limit: 250, type },
+  })
+  return decodeMcpResult(raw) || {}
+}
+
 export async function placeGateOrders(client, gateOrders, optionChain, io = { stderr: process.stderr }) {
   const results = []
   for (const order of gateOrders) {
     if (!PLACEABLE_STRUCTURES.has(order.structure)) {
-      results.push({ order, status: 'skipped', reason: `structure ${order.structure} not auto-placeable yet` })
-      io.stderr.write(`orders: skipped ${order.structure} (multi-leg placement pending)\n`)
+      results.push({ order, status: 'skipped', reason: `structure ${order.structure} not auto-placeable` })
+      io.stderr.write(`orders: skipped ${order.structure}\n`)
       continue
     }
     try {
-      const resolved = resolveHedgeContract(order, optionChain)
-      const args = buildPlaceArgs(resolved, order)
+      // Resolve every leg first — a partially-resolved structure is never sent (fail-closed).
+      const resolved = legSpecs(order).map((leg) => ({
+        ...resolveContract(optionChain, leg.right, leg.strike, order.expiry_days),
+        action: leg.action,
+      }))
+      const args = resolved.length === 1
+        ? buildPlaceArgs(resolved[0], order)
+        : buildMlegArgs(order, resolved)
       const raw = await client.callTool({ name: PLACE_TOOL, arguments: args })
-      results.push({ order, status: 'placed', contract: resolved.symbol, result: decodeMcpResult(raw) })
-      io.stderr.write(`orders: placed ${args.side} ${args.quantity}x ${resolved.symbol}\n`)
+      const symbols = resolved.map((r) => r.symbol)
+      results.push({ order, status: 'placed', contracts: symbols, result: decodeMcpResult(raw) })
+      io.stderr.write(`orders: placed ${order.structure} x${order.contracts} [${symbols.join(', ')}]\n`)
     } catch (error) {
       results.push({ order, status: 'failed', reason: error instanceof Error ? error.message : String(error) })
       io.stderr.write(`orders: FAILED to place ${order.structure}: ${error}\n`)
