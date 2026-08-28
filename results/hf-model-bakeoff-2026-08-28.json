@@ -1,0 +1,95 @@
+{
+  "candidates": [
+    {
+      "approved_for_dry_run": 0,
+      "cases": [
+        {
+          "elapsed_seconds": 20.343,
+          "exit_code": 0,
+          "scenario": "calm"
+        },
+        {
+          "elapsed_seconds": 19.658,
+          "exit_code": 0,
+          "scenario": "elevated"
+        },
+        {
+          "elapsed_seconds": 30.077,
+          "exit_code": 0,
+          "scenario": "stressed"
+        }
+      ],
+      "eligible": false,
+      "model_id": "moonshotai/Kimi-K3:baseten"
+    },
+    {
+      "approved_for_dry_run": 1,
+      "cases": [
+        {
+          "elapsed_seconds": 12.799,
+          "exit_code": 0,
+          "scenario": "calm"
+        },
+        {
+          "elapsed_seconds": 22.603,
+          "exit_code": 0,
+          "scenario": "elevated"
+        },
+        {
+          "elapsed_seconds": 8.514,
+          "exit_code": 0,
+          "scenario": "stressed"
+        }
+      ],
+      "eligible": false,
+      "model_id": "deepseek-ai/DeepSeek-V4-Pro-0813:baseten"
+    },
+    {
+      "approved_for_dry_run": 1,
+      "cases": [
+        {
+          "elapsed_seconds": 10.092,
+          "exit_code": 0,
+          "scenario": "calm"
+        },
+        {
+          "elapsed_seconds": 15.695,
+          "exit_code": 0,
+          "scenario": "elevated"
+        },
+        {
+          "elapsed_seconds": 10.299,
+          "exit_code": 0,
+          "scenario": "stressed"
+        }
+      ],
+      "eligible": false,
+      "model_id": "deepseek-ai/DeepSeek-V4-Flash-0731:baseten"
+    },
+    {
+      "approved_for_dry_run": 1,
+      "cases": [
+        {
+          "elapsed_seconds": 36.94,
+          "exit_code": 0,
+          "scenario": "calm"
+        },
+        {
+          "elapsed_seconds": 11.022,
+          "exit_code": 0,
+          "scenario": "elevated"
+        },
+        {
+          "elapsed_seconds": 16.363,
+          "exit_code": 0,
+          "scenario": "stressed"
+        }
+      ],
+      "eligible": false,
+      "model_id": "zai-org/GLM-5.3-Flash:baseten"
+    }
+  ],
+  "protocol": "fixed-three-regime-dsh-gate-v1",
+  "provider": "baseten",
+  "recorded_at": "2026-08-28T10:35:59.765212+00:00"
+}
