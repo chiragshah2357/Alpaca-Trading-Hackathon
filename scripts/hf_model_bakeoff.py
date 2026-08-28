@@ -38,6 +38,7 @@ def evaluate(repo_root: Path, model_id: str) -> dict[str, object]:
                 "DSH_PERMISSION_MODE": "read-only",
                 "DSH_TELEMETRY_MODE": "DISABLED",
                 "HF_MODEL_ID": model_id,
+                "APP_ROOT": str(repo_root),
             }
         )
         cases: list[dict[str, object]] = []
