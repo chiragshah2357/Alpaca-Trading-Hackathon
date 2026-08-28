@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -41,6 +42,7 @@ def evaluate(repo_root: Path, model_id: str) -> dict[str, object]:
         )
         cases: list[dict[str, object]] = []
         for scenario in SCENARIOS:
+            started = time.monotonic()
             completed = subprocess.run(
                 [
                     str(repo_root / "deploy" / "startup.sh"),
@@ -58,7 +60,13 @@ def evaluate(repo_root: Path, model_id: str) -> dict[str, object]:
                 check=False,
             )
             # Do not retain raw stdout/stderr: it may contain model output.
-            cases.append({"scenario": scenario, "exit_code": completed.returncode})
+            cases.append(
+                {
+                    "scenario": scenario,
+                    "exit_code": completed.returncode,
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                }
+            )
 
         rows = [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.exists() else []
         approved = [row for row in rows if row.get("gate", {}).get("status") == "approved_for_dry_run"]
