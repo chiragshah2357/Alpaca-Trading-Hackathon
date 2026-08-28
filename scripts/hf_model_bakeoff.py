@@ -13,6 +13,7 @@ import os
 import subprocess
 import tempfile
 import time
+from argparse import ArgumentParser
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -82,6 +83,9 @@ def evaluate(repo_root: Path, model_id: str) -> dict[str, object]:
 
 
 def main() -> None:
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True, help="sanitized JSON result path")
+    args = parser.parse_args()
     if not os.environ.get("HF_TOKEN"):
         raise SystemExit("HF_TOKEN must be supplied securely by the runner")
     repo_root = Path(__file__).resolve().parents[1]
@@ -91,6 +95,10 @@ def main() -> None:
         "recorded_at": datetime.now(UTC).isoformat(),
         "candidates": [evaluate(repo_root, model_id) for model_id in CANDIDATES],
     }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = args.output.with_suffix(args.output.suffix + ".tmp")
+    temporary_output.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary_output.replace(args.output)
     print(json.dumps(results, sort_keys=True))
 
 
