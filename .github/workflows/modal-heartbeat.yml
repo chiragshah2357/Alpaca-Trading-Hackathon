@@ -19,6 +19,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install Modal CLI
-        run: python -m pip install --upgrade "modal==1.4.3"
+        run: python -m pip install --upgrade "modal==1.5.4"
       - name: Deploy the durable heartbeat app
         run: modal deploy --strategy recreate deploy/modal_app.py
