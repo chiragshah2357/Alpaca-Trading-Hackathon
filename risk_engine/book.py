@@ -43,16 +43,12 @@ class BookEntry:
 # long footprint keeps a quiet week's directional noise down). Betas are config
 # estimates, refined later from live returns (feed.compute_beta).
 DEFAULT_BOOK: list[BookEntry] = [
-    BookEntry("SPY", 0.24, 1.00),   # broad-market core (500 names)
-    BookEntry("QQQ", 0.11, 1.10),   # tech / growth tilt (100 names)
-    BookEntry("IWM", 0.10, 1.15),   # small-cap breadth (2000 names)
-    BookEntry("DIA", 0.09, 0.95),   # large-cap value / industrials (30 names)
-    BookEntry("XLV", 0.08, 0.80),   # healthcare sector — defensive diversifier
-    BookEntry("XLF", 0.07, 1.10),   # financials sector
-    BookEntry("XLE", 0.04, 0.90),   # energy sector — low SPY correlation, real diversifier
-    BookEntry("AAPL", 0.02, 1.15),
-    BookEntry("MSFT", 0.02, 1.10),
-    BookEntry("NVDA", 0.03, 1.60),  # controlled momentum sleeve (high beta, kept small)
+    BookEntry("SPY", 0.33, 1.00),   # broad-market core (500 names)
+    BookEntry("QQQ", 0.15, 1.10),   # tech / growth tilt (100 names)
+    BookEntry("IWM", 0.14, 1.15),   # small-cap breadth (2000 names)
+    BookEntry("DIA", 0.12, 0.95),   # large-cap value / industrials (30 names)
+    BookEntry("AAPL", 0.03, 1.15),  # mega-cap single — small "real stocks" sleeve
+    BookEntry("MSFT", 0.03, 1.10),  # mega-cap single — small "real stocks" sleeve
 ]
 
 
