@@ -1,6 +1,7 @@
-import { getDecisionContext, placeApprovedDecision, submitDecision } from './decision-bridge.js'
+import { executeAutonomousOptionsOverlay, getDecisionContext, submitDecision } from './decision-bridge.js'
 
 export const HF_CHAT_COMPLETIONS_URL = 'https://router.huggingface.co/v1/chat/completions'
+export const PROVIDER_TIMEOUT_MS = 30_000
 
 const PROFILES = [
   { family: 'deepseek-v4', ids: ['deepseek-ai/DeepSeek-V4-Pro-0813', 'deepseek-ai/DeepSeek-V4-Flash-0731'] },
@@ -99,10 +100,20 @@ export function normalizeToolCall(profile, assistant, expectedName) {
   return { ok: true, call: { id, name, arguments: parsed.value } }
 }
 
-function nativeAssistant(profile, assistant) {
+function nativeAssistant(profile, assistant, normalizedCall) {
   // Kimi requires the provider's reasoning field to remain adjacent to its
   // tool call on the second request. Do not log or persist this message.
-  const message = { role: 'assistant', content: assistant.content ?? null, tool_calls: assistant.tool_calls }
+  const message = {
+    role: 'assistant',
+    content: assistant.content ?? null,
+    // XML/DSML fallbacks have no OpenAI-compatible tool_calls array. Rebuild
+    // it from the validated canonical call before appending the tool result.
+    tool_calls: assistant.tool_calls ?? [{
+      id: normalizedCall.id,
+      type: 'function',
+      function: { name: normalizedCall.name, arguments: JSON.stringify(normalizedCall.arguments) },
+    }],
+  }
   if (profile.family === 'kimi-k3' && typeof assistant.reasoning_content === 'string') {
     message.reasoning_content = assistant.reasoning_content
   }
@@ -128,13 +139,16 @@ function sanitizedMetadata(profile, response, elapsedMs, normalized) {
   }
 }
 
-async function requestToolCall({ profile, token, messages, tool, fetchImpl, now }) {
+async function requestToolCall({ profile, token, messages, tool, fetchImpl, now, providerTimeoutMs }) {
   const started = now()
   let response
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), providerTimeoutMs)
   try {
     response = await fetchImpl(HF_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
         model: profile.modelId,
         stream: false,
@@ -144,26 +158,29 @@ async function requestToolCall({ profile, token, messages, tool, fetchImpl, now 
         tool_choice: { type: 'function', function: { name: tool.function.name } },
       }),
     })
-  } catch { return failure('provider_timeout', { profile: profile.family, elapsed_ms: now() - started }) }
-  if (!response.ok) {
-    const failureKind = response.status === 401 || response.status === 403
-      ? 'provider_auth_error'
-      : response.status === 429
-        ? 'provider_rate_limited'
-        : 'provider_timeout'
-    return failure(failureKind, {
-      model: profile.modelId,
-      provider: 'huggingface-router/baseten',
-      profile: profile.family,
-      http_status: response.status,
-      elapsed_ms: now() - started,
-    })
+    if (!response.ok) {
+      const failureKind = response.status === 401 || response.status === 403
+        ? 'provider_auth_error'
+        : response.status === 429
+          ? 'provider_rate_limited'
+          : 'provider_timeout'
+      return failure(failureKind, {
+        model: profile.modelId,
+        provider: 'huggingface-router/baseten',
+        profile: profile.family,
+        http_status: response.status,
+        elapsed_ms: now() - started,
+      })
+    }
+    // Keep the deadline active while consuming the response body as well.
+    const body = await response.json()
+    const assistant = body?.choices?.[0]?.message
+    const parsed = normalizeToolCall(profile, assistant, tool.function.name)
+    const metadata = sanitizedMetadata(profile, body, now() - started, parsed)
+    return parsed.ok ? { ...parsed, assistant, metadata } : { ...parsed, metadata: { ...metadata, ...parsed.metadata } }
+  } catch { return failure('provider_timeout', { profile: profile.family, elapsed_ms: now() - started }) } finally {
+    clearTimeout(timeout)
   }
-  const body = await response.json()
-  const assistant = body?.choices?.[0]?.message
-  const parsed = normalizeToolCall(profile, assistant, tool.function.name)
-  const metadata = sanitizedMetadata(profile, body, now() - started, parsed)
-  return parsed.ok ? { ...parsed, assistant, metadata } : { ...parsed, metadata: { ...metadata, ...parsed.metadata } }
 }
 
 // This is deliberately a transport-only probe.  It never reads a portfolio
@@ -172,6 +189,7 @@ async function requestToolCall({ profile, token, messages, tool, fetchImpl, now 
 export async function runDirectToolProbe({
   fetchImpl = fetch,
   now = () => Date.now(),
+  providerTimeoutMs = PROVIDER_TIMEOUT_MS,
   token = process.env.HF_TOKEN,
   modelId = process.env.HF_MODEL_ID,
 } = {}) {
@@ -187,6 +205,7 @@ export async function runDirectToolProbe({
     tool: GET_CONTEXT,
     fetchImpl,
     now,
+    providerTimeoutMs,
   })
   return result.ok
     ? { status: 'completed', failure: null, protocol: [result.metadata] }
@@ -196,11 +215,12 @@ export async function runDirectToolProbe({
 export async function runModelNativeDecision(config, {
   fetchImpl = fetch,
   now = () => Date.now(),
+  providerTimeoutMs = PROVIDER_TIMEOUT_MS,
   token = process.env.HF_TOKEN,
   modelId = process.env.HF_MODEL_ID,
   getContext = getDecisionContext,
   submit = submitDecision,
-  place = placeApprovedDecision,
+  executeAutonomous = executeAutonomousOptionsOverlay,
 } = {}) {
   if (!token) throw new Error('HF_TOKEN is required for the model-native adapter')
   const profile = modelProfile(modelId ?? '')
@@ -208,13 +228,13 @@ export async function runModelNativeDecision(config, {
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: config.instruction },
   ]
-  const phaseOne = await requestToolCall({ profile, token, messages, tool: GET_CONTEXT, fetchImpl, now })
+  const phaseOne = await requestToolCall({ profile, token, messages, tool: GET_CONTEXT, fetchImpl, now, providerTimeoutMs })
   if (!phaseOne.ok) return { status: 'failed', failure: phaseOne.failure, metadata: phaseOne.metadata, protocol: [phaseOne.metadata] }
   let context
   try { context = await getContext(config) } catch { return { status: 'failed', failure: 'tool_dispatch_error', metadata: phaseOne.metadata, protocol: [phaseOne.metadata] } }
-  messages.push(nativeAssistant(profile, phaseOne.assistant))
+  messages.push(nativeAssistant(profile, phaseOne.assistant, phaseOne.call))
   messages.push({ role: 'tool', tool_call_id: phaseOne.call.id, content: JSON.stringify(context) })
-  const phaseTwo = await requestToolCall({ profile, token, messages, tool: SUBMIT_DECISION, fetchImpl, now })
+  const phaseTwo = await requestToolCall({ profile, token, messages, tool: SUBMIT_DECISION, fetchImpl, now, providerTimeoutMs })
   if (!phaseTwo.ok) {
     return {
       status: 'failed',
@@ -227,9 +247,16 @@ export async function runModelNativeDecision(config, {
   try { value = await submit(config, phaseTwo.call.arguments) } catch {
     return { status: 'failed', failure: 'tool_dispatch_error', metadata: phaseTwo.metadata, protocol: [phaseOne.metadata, phaseTwo.metadata] }
   }
-  if (value.gate?.status === 'approved_for_dry_run' && config.placeOrders) {
-    try { value.placement = await place(value.gate) } catch (error) {
-      value.placement = { status: 'error', reason: error instanceof Error ? error.message : String(error) }
+  if (config.executionMode === 'autonomous-paper' && value?.gate?.status === 'approved_for_dry_run') {
+    const orders = value?.gate?.orders
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return { status: 'completed', value, metadata: phaseTwo.metadata, protocol: [phaseOne.metadata, phaseTwo.metadata] }
+    }
+    try {
+      const execution = await executeAutonomous(config, value.decision_id)
+      return { status: 'completed', value, execution, metadata: phaseTwo.metadata, protocol: [phaseOne.metadata, phaseTwo.metadata] }
+    } catch {
+      return { status: 'failed', failure: 'autonomous_execution_failed', metadata: phaseTwo.metadata, protocol: [phaseOne.metadata, phaseTwo.metadata] }
     }
   }
   return { status: 'completed', value, metadata: phaseTwo.metadata, protocol: [phaseOne.metadata, phaseTwo.metadata] }

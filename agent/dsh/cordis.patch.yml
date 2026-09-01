@@ -112,10 +112,11 @@
       config:
         repositoryRoot: !!js ctx.portfolioStartup.repositoryRoot
         scenario: !!js ctx.portfolioStartup.scenario
+        mock: !!js ctx.portfolioStartup.mock
         live: !!js ctx.portfolioStartup.live
         ledgerPath: !!js ctx.portfolioStartup.ledgerPath
         pythonExecutable: python3
-        placeOrders: !!js ctx.portfolioStartup.placeOrders
+        executionMode: !!js ctx.portfolioStartup.executionMode
 
     - id: portfolio-startup
       name: alpaca-portfolio-dsh/startup
@@ -126,10 +127,11 @@
       config:
         repositoryRoot: !!js ctx.portfolioStartup.repositoryRoot
         scenario: !!js ctx.portfolioStartup.scenario
+        mock: !!js ctx.portfolioStartup.mock
         live: !!js ctx.portfolioStartup.live
         ledgerPath: !!js ctx.portfolioStartup.ledgerPath
         pythonExecutable: python3
-        placeOrders: !!js ctx.portfolioStartup.placeOrders
+        executionMode: !!js ctx.portfolioStartup.executionMode
         instruction: !!js ctx.portfolioStartup.instruction
         heartbeat: !!js ctx.portfolioStartup.heartbeat
 
@@ -139,10 +141,11 @@
       config:
         repositoryRoot: !!js ctx.portfolioStartup.repositoryRoot
         scenario: !!js ctx.portfolioStartup.scenario
+        mock: !!js ctx.portfolioStartup.mock
         live: !!js ctx.portfolioStartup.live
         ledgerPath: !!js ctx.portfolioStartup.ledgerPath
         pythonExecutable: python3
-        placeOrders: !!js ctx.portfolioStartup.placeOrders
+        executionMode: !!js ctx.portfolioStartup.executionMode
         heartbeat: !!js ctx.portfolioStartup.heartbeat
         instruction: !!js ctx.portfolioStartup.instruction
         intervalMs: !!js ctx.portfolioStartup.intervalMs

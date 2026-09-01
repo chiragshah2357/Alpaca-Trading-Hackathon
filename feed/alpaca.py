@@ -76,6 +76,38 @@ class AlpacaDataSource:
             out.append((p.symbol, float(p.qty), price))
         return out
 
+    def open_order_ids(self) -> list[str]:
+        """Return open paper-order IDs for submission-time reconciliation."""
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+
+        orders = self._trading.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        return [str(order.id) for order in orders]
+
+    def is_market_open(self) -> bool:
+        """Use the broker clock rather than a guessed UTC session window."""
+        return bool(self._trading.get_clock().is_open)
+
+    def order_status(self, order_id: str) -> dict[str, str]:
+        """Return one broker order's canonical id/status for paper reconciliation."""
+        order = self._trading.get_order_by_id(order_id)
+        return self._normalized_order_status(order)
+
+    def order_status_by_client_order_id(self, client_order_id: str) -> dict[str, str]:
+        """Look up an uncertain write by the deterministic broker idempotency key."""
+        return self._normalized_order_status(
+            self._trading.get_order_by_client_id(client_order_id)
+        )
+
+    @staticmethod
+    def _normalized_order_status(order) -> dict[str, str]:
+        status = str(getattr(order.status, "value", order.status)).lower()
+        # Alpaca's normal resting-order states are all the ledger's accepted
+        # state; preserving them verbatim would make reconciliation fail.
+        if status in {"new", "pending_new", "accepted", "accepted_for_bidding", "pending_replace", "pending_cancel"}:
+            status = "accepted"
+        return {"alpaca_order_id": str(order.id), "state": status}
+
     # --- order placement (one-off seeding) ---------------------------------
     def submit_market_order(self, symbol: str, qty: int | float) -> str:
         """Submit a day market buy order on the configured Alpaca account; returns the order id.
